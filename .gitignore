@@ -2,6 +2,7 @@
 build/
 build_x64/
 bin/
+dist/
 *.obj
 *.res
 *.exp
@@ -17,12 +18,14 @@ CMakeCache.txt
 # Dependencies source git repos
 deps/
 
-# Python caches
+# Python caches and distributions
 __pycache__/
 *.pyc
 *.pyo
 *.egg-info/
 .pytest_cache/
+python/dist/
+python/build/
 
 # Ignore test images if temporary
 test_canvas.bmp

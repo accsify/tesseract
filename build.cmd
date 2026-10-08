@@ -162,6 +162,13 @@ if exist "%BIN_DIR%\x86\tesseract_cli.exe" copy /y "%BIN_DIR%\x86\tesseract_cli.
 echo [OK] x86 binary created: %DIST_DIR%\x86\tesseract_engine.dll
 if exist "%DIST_DIR%\x86\tesseract_cli.exe" echo [OK] x86 CLI created:    %DIST_DIR%\x86\tesseract_cli.exe
 
+:: Sync to python package lib directory
+set "PY_LIB_DIR=%PROJECT_ROOT%python\accsify_tesseract\lib"
+if not exist "%PY_LIB_DIR%\x64" mkdir "%PY_LIB_DIR%\x64"
+if not exist "%PY_LIB_DIR%\x86" mkdir "%PY_LIB_DIR%\x86"
+if exist "%DIST_DIR%\x64\tesseract_engine.dll" copy /y "%DIST_DIR%\x64\*.*" "%PY_LIB_DIR%\x64\" >nul
+if exist "%DIST_DIR%\x86\tesseract_engine.dll" copy /y "%DIST_DIR%\x86\*.*" "%PY_LIB_DIR%\x86\" >nul
+
 :FINISH
 echo.
 echo =====================================================================

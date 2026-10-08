@@ -46,6 +46,101 @@ PROGRESS_CALLBACK_TYPE = CFUNCTYPE(
 )
 
 
+def get_native_lib_dir(arch: Optional[str] = None) -> Optional[Path]:
+    """
+    Return directory containing bundled native libraries for the specified architecture.
+    Defaults to current Python process architecture ('x64' or 'x86').
+    """
+    if arch is None:
+        arch = "x64" if sys.maxsize > 2**32 else "x86"
+    pkg_dir = Path(__file__).resolve().parent
+    for candidate in [
+        pkg_dir / "lib" / arch,
+        pkg_dir / "lib",
+    ]:
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+def get_native_dll_path(arch: Optional[str] = None) -> Optional[Path]:
+    """
+    Return path to bundled or discovered tesseract_engine.dll.
+    Natively searches the package's internal lib/ folder first, then external fallback directories.
+    """
+    if arch is None:
+        arch = "x64" if sys.maxsize > 2**32 else "x86"
+    pkg_dir = Path(__file__).resolve().parent
+
+    # 1. First priority: Package-internal lib/ directory (bundled in wheel)
+    internal_candidates = [
+        pkg_dir / "lib" / arch / "tesseract_engine.dll",
+        pkg_dir / "lib" / "tesseract_engine.dll",
+    ]
+    for p in internal_candidates:
+        if p.is_file():
+            return p
+
+    # 2. Second priority: Main external and repository search directories
+    repo_root = pkg_dir.parent.parent
+    external_candidates = [
+        repo_root / "dist" / arch / "tesseract_engine.dll",
+        repo_root / "dist" / "tesseract_engine.dll",
+        repo_root / "bin" / arch / "tesseract_engine.dll",
+        repo_root / "build" / arch / "bin" / "tesseract_engine.dll",
+        Path.cwd() / "dist" / arch / "tesseract_engine.dll",
+        Path.cwd() / "dist" / "tesseract_engine.dll",
+        Path.cwd() / "lib" / arch / "tesseract_engine.dll",
+        Path.cwd() / "lib" / "tesseract_engine.dll",
+        Path.cwd() / f"tesseract_engine_{arch}.dll",
+        Path.cwd() / "tesseract_engine.dll",
+    ]
+    for p in external_candidates:
+        if p.is_file():
+            return p
+
+    return None
+
+
+def get_native_cli_path(arch: Optional[str] = None) -> Optional[Path]:
+    """
+    Return path to bundled or discovered tesseract_cli.exe executable.
+    Natively searches the package's internal lib/ folder first, then external fallback directories.
+    """
+    if arch is None:
+        arch = "x64" if sys.maxsize > 2**32 else "x86"
+    pkg_dir = Path(__file__).resolve().parent
+
+    # 1. First priority: Package-internal lib/ directory
+    internal_candidates = [
+        pkg_dir / "lib" / arch / "tesseract_cli.exe",
+        pkg_dir / "lib" / "tesseract_cli.exe",
+    ]
+    for p in internal_candidates:
+        if p.is_file():
+            return p
+
+    # 2. Second priority: Main external and repository search directories
+    repo_root = pkg_dir.parent.parent
+    external_candidates = [
+        repo_root / "dist" / arch / "tesseract_cli.exe",
+        repo_root / "dist" / "tesseract_cli.exe",
+        repo_root / "bin" / arch / "tesseract_cli.exe",
+        repo_root / "build" / arch / "bin" / "tesseract_cli.exe",
+        Path.cwd() / "dist" / arch / "tesseract_cli.exe",
+        Path.cwd() / "dist" / "tesseract_cli.exe",
+        Path.cwd() / "lib" / arch / "tesseract_cli.exe",
+        Path.cwd() / "lib" / "tesseract_cli.exe",
+        Path.cwd() / f"tesseract_cli_{arch}.exe",
+        Path.cwd() / "tesseract_cli.exe",
+    ]
+    for p in external_candidates:
+        if p.is_file():
+            return p
+
+    return None
+
+
 class NativeLibrary:
     """Singleton wrapper around loaded tesseract_engine.dll."""
     _instance: Optional['NativeLibrary'] = None
@@ -72,34 +167,52 @@ class NativeLibrary:
             return ctypes.CDLL(str(p))
 
         arch = "x64" if sys.maxsize > 2**32 else "x86"
-        base_dir = Path(__file__).resolve().parent.parent.parent
+        pkg_dir = Path(__file__).resolve().parent
+        repo_root = pkg_dir.parent.parent
 
-        candidate_paths = [
-            base_dir / "dist" / arch / "tesseract_engine.dll",
-            base_dir / "bin" / arch / "tesseract_engine.dll",
-            base_dir / "build" / arch / "bin" / "tesseract_engine.dll",
+        # 1. Check native package lib directory first
+        internal_dlls = [
+            pkg_dir / "lib" / arch / "tesseract_engine.dll",
+            pkg_dir / "lib" / "tesseract_engine.dll",
+        ]
+        for p in internal_dlls:
+            if p.is_file():
+                try:
+                    return ctypes.CDLL(str(p))
+                except Exception as e:
+                    raise RuntimeError(f"Found bundled DLL at {p} but failed to load: {e}")
+
+        # 2. Main fallback search directories (dist/, build/, cwd/)
+        external_dlls = [
+            repo_root / "dist" / arch / "tesseract_engine.dll",
+            repo_root / "dist" / "tesseract_engine.dll",
+            repo_root / "bin" / arch / "tesseract_engine.dll",
+            repo_root / "build" / arch / "bin" / "tesseract_engine.dll",
             Path.cwd() / "dist" / arch / "tesseract_engine.dll",
+            Path.cwd() / "dist" / "tesseract_engine.dll",
+            Path.cwd() / "lib" / arch / "tesseract_engine.dll",
+            Path.cwd() / "lib" / "tesseract_engine.dll",
             Path.cwd() / "bin" / arch / "tesseract_engine.dll",
             Path.cwd() / f"tesseract_engine_{arch}.dll",
             Path.cwd() / "tesseract_engine.dll",
         ]
-
-        for p in candidate_paths:
+        for p in external_dlls:
             if p.is_file():
                 try:
                     return ctypes.CDLL(str(p))
                 except Exception as e:
                     raise RuntimeError(f"Found DLL at {p} but failed to load: {e}")
 
-        # Fallback to system search path
+        # 3. Fallback to Windows system library search path
         try:
             return ctypes.CDLL("tesseract_engine.dll")
         except Exception:
-            candidates_str = "\n".join(f"  - {p}" for p in candidate_paths)
+            all_searched = internal_dlls + external_dlls
+            candidates_str = "\n".join(f"  - {p}" for p in all_searched)
             raise FileNotFoundError(
                 f"Could not locate tesseract_engine.dll for architecture '{arch}'.\n"
-                f"Searched candidate locations:\n{candidates_str}\n"
-                f"Please run 'build.cmd' first to compile the DLL."
+                f"Searched locations (package lib checked first):\n{candidates_str}\n"
+                f"Please ensure lib/{arch}/tesseract_engine.dll is bundled or run 'build.cmd' to compile the DLL."
             )
 
     def _bind_functions(self):

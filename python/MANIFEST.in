@@ -3,3 +3,4 @@ include LICENSE
 include pyproject.toml
 include setup.cfg
 recursive-include accsify_tesseract *.py py.typed
+recursive-include accsify_tesseract/lib *.dll *.exe *.lib

@@ -53,6 +53,13 @@ from .iterator import (
     TesseractIterator,
 )
 
+from .core import (
+    NativeLibrary,
+    get_native_lib_dir,
+    get_native_dll_path,
+    get_native_cli_path,
+)
+
 from .engine import (
     TesseractEngine,
     BatchOcrResult,
@@ -119,6 +126,10 @@ def image_to_dict(
 __all__ = [
     "__version__",
     "__company__",
+    "NativeLibrary",
+    "get_native_lib_dir",
+    "get_native_dll_path",
+    "get_native_cli_path",
     "TesseractEngine",
     "TesseractIterator",
     "BatchOcrResult",
