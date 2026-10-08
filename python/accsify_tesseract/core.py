@@ -1,0 +1,242 @@
+"""
+Low-Level C ABI Bindings and DLL Loader for Accsify Tesseract.
+=============================================================
+Company: accsify
+Copyright (C) 2026 accsify. All rights reserved.
+"""
+
+import sys
+import ctypes
+from ctypes import (
+    c_int, c_char_p, c_void_p, c_float, c_double,
+    c_int32, c_int64, c_size_t, POINTER, Structure, CFUNCTYPE
+)
+from pathlib import Path
+from typing import Optional
+
+
+# C Structures matching tesseract_engine.h (#pragma pack(push, 8))
+class CModelInfo(Structure):
+    _pack_ = 8
+    _fields_ = [
+        ("name", ctypes.c_char * 64),
+        ("display_name", ctypes.c_char * 128),
+        ("model_type", c_int32),
+        ("file_size", c_int64),
+        ("download_url", ctypes.c_char * 256),
+        ("is_installed", c_int32),
+    ]
+
+
+class CBoundingBox(Structure):
+    _pack_ = 8
+    _fields_ = [
+        ("left", c_int32),
+        ("top", c_int32),
+        ("right", c_int32),
+        ("bottom", c_int32),
+    ]
+
+
+# Callback prototype for download progress:
+# int (*TessDownloadProgressCallback)(const char*, int, int64_t, int64_t, double, const char*, void*)
+PROGRESS_CALLBACK_TYPE = CFUNCTYPE(
+    c_int,
+    c_char_p, c_int32, c_int64, c_int64, c_double, c_char_p, c_void_p
+)
+
+
+class NativeLibrary:
+    """Singleton wrapper around loaded tesseract_engine.dll."""
+    _instance: Optional['NativeLibrary'] = None
+
+    def __init__(self, custom_dll_path: Optional[str] = None):
+        self._dll = self._load_dll(custom_dll_path)
+        self._bind_functions()
+
+    @classmethod
+    def get(cls, custom_dll_path: Optional[str] = None) -> 'NativeLibrary':
+        if cls._instance is None:
+            cls._instance = cls(custom_dll_path)
+        return cls._instance
+
+    @property
+    def dll(self) -> ctypes.CDLL:
+        return self._dll
+
+    def _load_dll(self, custom_dll_path: Optional[str]) -> ctypes.CDLL:
+        if custom_dll_path:
+            p = Path(custom_dll_path)
+            if not p.is_file():
+                raise FileNotFoundError(f"Specified DLL path does not exist: {p}")
+            return ctypes.CDLL(str(p))
+
+        arch = "x64" if sys.maxsize > 2**32 else "x86"
+        base_dir = Path(__file__).resolve().parent.parent.parent
+
+        candidate_paths = [
+            base_dir / "dist" / arch / "tesseract_engine.dll",
+            base_dir / "bin" / arch / "tesseract_engine.dll",
+            base_dir / "build" / arch / "bin" / "tesseract_engine.dll",
+            Path.cwd() / "dist" / arch / "tesseract_engine.dll",
+            Path.cwd() / "bin" / arch / "tesseract_engine.dll",
+            Path.cwd() / f"tesseract_engine_{arch}.dll",
+            Path.cwd() / "tesseract_engine.dll",
+        ]
+
+        for p in candidate_paths:
+            if p.is_file():
+                try:
+                    return ctypes.CDLL(str(p))
+                except Exception as e:
+                    raise RuntimeError(f"Found DLL at {p} but failed to load: {e}")
+
+        # Fallback to system search path
+        try:
+            return ctypes.CDLL("tesseract_engine.dll")
+        except Exception:
+            candidates_str = "\n".join(f"  - {p}" for p in candidate_paths)
+            raise FileNotFoundError(
+                f"Could not locate tesseract_engine.dll for architecture '{arch}'.\n"
+                f"Searched candidate locations:\n{candidates_str}\n"
+                f"Please run 'build.cmd' first to compile the DLL."
+            )
+
+    def _bind_functions(self):
+        d = self._dll
+
+        d.tess_version.restype = c_char_p
+        d.tess_version.argtypes = []
+
+        d.tess_create.restype = c_void_p
+        d.tess_create.argtypes = []
+
+        d.tess_destroy.restype = None
+        d.tess_destroy.argtypes = [c_void_p]
+
+        d.tess_init.restype = c_int
+        d.tess_init.argtypes = [c_void_p, c_char_p, c_char_p, c_int]
+
+        d.tess_is_initialized.restype = c_int
+        d.tess_is_initialized.argtypes = [c_void_p]
+
+        d.tess_set_variable.restype = c_int
+        d.tess_set_variable.argtypes = [c_void_p, c_char_p, c_char_p]
+
+        d.tess_get_variable.restype = c_int
+        d.tess_get_variable.argtypes = [c_void_p, c_char_p, c_char_p, c_int]
+
+        d.tess_set_page_seg_mode.restype = None
+        d.tess_set_page_seg_mode.argtypes = [c_void_p, c_int]
+
+        d.tess_get_page_seg_mode.restype = c_int
+        d.tess_get_page_seg_mode.argtypes = [c_void_p]
+
+        d.tess_set_source_resolution.restype = None
+        d.tess_set_source_resolution.argtypes = [c_void_p, c_int]
+
+        d.tess_set_image_file.restype = c_int
+        d.tess_set_image_file.argtypes = [c_void_p, c_char_p]
+
+        d.tess_set_image_bytes.restype = c_int
+        d.tess_set_image_bytes.argtypes = [c_void_p, POINTER(ctypes.c_ubyte), c_size_t]
+
+        d.tess_set_image_raw.restype = c_int
+        d.tess_set_image_raw.argtypes = [c_void_p, POINTER(ctypes.c_ubyte), c_int, c_int, c_int, c_int]
+
+        d.tess_recognize.restype = c_int
+        d.tess_recognize.argtypes = [c_void_p]
+
+        d.tess_get_utf8_text.restype = c_void_p
+        d.tess_get_utf8_text.argtypes = [c_void_p]
+
+        d.tess_get_hocr_text.restype = c_void_p
+        d.tess_get_hocr_text.argtypes = [c_void_p, c_int]
+
+        d.tess_get_tsv_text.restype = c_void_p
+        d.tess_get_tsv_text.argtypes = [c_void_p, c_int]
+
+        d.tess_get_box_text.restype = c_void_p
+        d.tess_get_box_text.argtypes = [c_void_p, c_int]
+
+        d.tess_get_unlv_text.restype = c_void_p
+        d.tess_get_unlv_text.argtypes = [c_void_p]
+
+        d.tess_get_mean_confidence.restype = c_int
+        d.tess_get_mean_confidence.argtypes = [c_void_p]
+
+        d.tess_free_text.restype = None
+        d.tess_free_text.argtypes = [c_void_p]
+
+        d.tess_detect_orientation_script.restype = c_int
+        d.tess_detect_orientation_script.argtypes = [
+            c_void_p, POINTER(c_int), POINTER(c_float), c_char_p, c_int, POINTER(c_float)
+        ]
+
+        d.tess_analyse_layout.restype = c_void_p
+        d.tess_analyse_layout.argtypes = [c_void_p]
+
+        d.tess_get_iterator.restype = c_void_p
+        d.tess_get_iterator.argtypes = [c_void_p]
+
+        d.tess_iterator_next.restype = c_int
+        d.tess_iterator_next.argtypes = [c_void_p, c_int]
+
+        d.tess_iterator_is_at_beginning_of.restype = c_int
+        d.tess_iterator_is_at_beginning_of.argtypes = [c_void_p, c_int]
+
+        d.tess_iterator_get_bounding_box.restype = c_int
+        d.tess_iterator_get_bounding_box.argtypes = [
+            c_void_p, c_int, POINTER(c_int), POINTER(c_int), POINTER(c_int), POINTER(c_int)
+        ]
+
+        d.tess_iterator_get_text.restype = c_void_p
+        d.tess_iterator_get_text.argtypes = [c_void_p, c_int]
+
+        d.tess_iterator_get_confidence.restype = c_float
+        d.tess_iterator_get_confidence.argtypes = [c_void_p, c_int]
+
+        d.tess_iterator_get_writing_direction.restype = c_int
+        d.tess_iterator_get_writing_direction.argtypes = [c_void_p, POINTER(c_int)]
+
+        d.tess_iterator_get_textline_order.restype = c_int
+        d.tess_iterator_get_textline_order.argtypes = [c_void_p, POINTER(c_int)]
+
+        d.tess_iterator_get_deskew_angle.restype = c_int
+        d.tess_iterator_get_deskew_angle.argtypes = [c_void_p, POINTER(c_float)]
+
+        d.tess_iterator_destroy.restype = None
+        d.tess_iterator_destroy.argtypes = [c_void_p]
+
+        d.tess_model_set_path.restype = c_int
+        d.tess_model_set_path.argtypes = [c_char_p]
+
+        d.tess_model_get_path.restype = c_int
+        d.tess_model_get_path.argtypes = [c_char_p, c_int]
+
+        d.tess_model_get_default_path.restype = c_int
+        d.tess_model_get_default_path.argtypes = [c_char_p, c_int]
+
+        d.tess_model_is_installed.restype = c_int
+        d.tess_model_is_installed.argtypes = [c_char_p, c_int]
+
+        d.tess_model_get_catalog_count.restype = c_int
+        d.tess_model_get_catalog_count.argtypes = [c_int]
+
+        d.tess_model_get_catalog_item.restype = c_int
+        d.tess_model_get_catalog_item.argtypes = [c_int, c_int, POINTER(CModelInfo)]
+
+        d.tess_model_download.restype = c_int
+        d.tess_model_download.argtypes = [c_char_p, c_int, PROGRESS_CALLBACK_TYPE, c_void_p]
+
+        d.tess_model_download_async.restype = c_int
+        d.tess_model_download_async.argtypes = [c_char_p, c_int, PROGRESS_CALLBACK_TYPE, c_void_p, POINTER(c_void_p)]
+
+        d.tess_model_cancel_download.restype = c_int
+        d.tess_model_cancel_download.argtypes = [c_void_p]
+
+        d.tess_model_get_installed_count.restype = c_int
+        d.tess_model_get_installed_count.argtypes = []
+
+        d.tess_model_get_installed_item.restype = c_int
+        d.tess_model_get_installed_item.argtypes = [c_int, c_char_p, c_int]

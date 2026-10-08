@@ -1,0 +1,27 @@
+# Build intermediates
+build/
+build_x64/
+*.obj
+*.res
+*.exp
+*.ilk
+*.pdb
+*.tmp
+*.part
+CMakeFiles/
+CMakeCache.txt
+*.ninja*
+.ninja*
+
+# Dependencies source git repos
+deps/
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# Ignore test images if temporary
+test_canvas.bmp

@@ -1,0 +1,459 @@
+/**
+ * @file engine_api.cpp
+ * @brief Complete C ABI implementation for Tesseract OCR, Layout Analysis, OSD, and Formatting.
+ * @company accsi
+ * @copyright Copyright (C) 2026 accsi. All rights reserved.
+ */
+
+#include "tesseract_engine.h"
+
+// Define STB image loader
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_NO_STDIO
+#include "stb_image.h"
+
+// Leptonica headers
+#include <allheaders.h>
+
+// Tesseract C++ API headers
+#include <tesseract/baseapi.h>
+#include <tesseract/pageiterator.h>
+#include <tesseract/resultiterator.h>
+#include <tesseract/publictypes.h>
+#include <tesseract/version.h>
+
+#include <windows.h>
+#include <string>
+#include <vector>
+#include <memory>
+#include <cstring>
+#include <fstream>
+#include <iostream>
+
+namespace accsi {
+    std::string get_active_model_path();
+}
+
+struct EngineContext {
+    tesseract::TessBaseAPI api;
+    bool initialized = false;
+    std::vector<unsigned char> raw_image_pixels;
+    int image_w = 0;
+    int image_h = 0;
+    int image_bpp = 0;
+    Pix* current_pix = nullptr;
+
+    void cleanup_image() {
+        if (current_pix) {
+            pixDestroy(&current_pix);
+            current_pix = nullptr;
+        }
+        raw_image_pixels.clear();
+        image_w = 0;
+        image_h = 0;
+        image_bpp = 0;
+    }
+
+    ~EngineContext() {
+        cleanup_image();
+        if (initialized) {
+            api.End();
+            initialized = false;
+        }
+    }
+};
+
+struct IteratorContext {
+    tesseract::PageIterator* page_iter = nullptr;
+    tesseract::ResultIterator* res_iter = nullptr;
+    bool is_result = false;
+
+    ~IteratorContext() {
+        if (res_iter) {
+            delete res_iter;
+            res_iter = nullptr;
+            page_iter = nullptr;
+        } else if (page_iter) {
+            delete page_iter;
+            page_iter = nullptr;
+        }
+    }
+};
+
+static char* duplicate_string(const char* src) {
+    if (!src) return nullptr;
+    size_t len = strlen(src);
+    char* copy = (char*)malloc(len + 1);
+    if (copy) {
+        memcpy(copy, src, len + 1);
+    }
+    return copy;
+}
+
+extern "C" {
+
+TESS_API const char* TESS_CALL tess_version(void) {
+    return tesseract::TessBaseAPI::Version();
+}
+
+TESS_API TessEngineHandle TESS_CALL tess_create(void) {
+    setMsgSeverity(L_SEVERITY_NONE);
+    auto ctx = new (std::nothrow) EngineContext();
+    return reinterpret_cast<TessEngineHandle>(ctx);
+}
+
+TESS_API void TESS_CALL tess_destroy(TessEngineHandle handle) {
+    if (!handle) return;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    delete ctx;
+}
+
+TESS_API int TESS_CALL tess_init(TessEngineHandle handle, const char* datapath, const char* language, int oem_mode) {
+    if (!handle) return -1;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+
+    std::string path;
+    if (datapath && datapath[0] != '\0') {
+        path = datapath;
+    } else {
+        char buf[512] = {0};
+        tess_model_get_path(buf, sizeof(buf));
+        path = buf;
+    }
+
+    const char* lang = (language && language[0] != '\0') ? language : "eng";
+    tesseract::OcrEngineMode oem = static_cast<tesseract::OcrEngineMode>(oem_mode);
+
+    int res = ctx->api.Init(path.c_str(), lang, oem);
+    if (res == 0) {
+        ctx->initialized = true;
+    }
+    return res;
+}
+
+TESS_API int TESS_CALL tess_is_initialized(TessEngineHandle handle) {
+    if (!handle) return 0;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    return ctx->initialized ? 1 : 0;
+}
+
+TESS_API int TESS_CALL tess_set_variable(TessEngineHandle handle, const char* name, const char* value) {
+    if (!handle || !name || !value) return 0;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    return ctx->api.SetVariable(name, value) ? 1 : 0;
+}
+
+TESS_API int TESS_CALL tess_get_variable(TessEngineHandle handle, const char* name, char* buffer, int max_len) {
+    if (!handle || !name || !buffer || max_len <= 0) return 0;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    const char* val = ctx->api.GetStringVariable(name);
+    if (val) {
+        strncpy_s(buffer, max_len, val, _TRUNCATE);
+        return 1;
+    }
+    return 0;
+}
+
+TESS_API void TESS_CALL tess_set_page_seg_mode(TessEngineHandle handle, int psm_mode) {
+    if (!handle) return;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    ctx->api.SetPageSegMode(static_cast<tesseract::PageSegMode>(psm_mode));
+}
+
+TESS_API int TESS_CALL tess_get_page_seg_mode(TessEngineHandle handle) {
+    if (!handle) return 0;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    return static_cast<int>(ctx->api.GetPageSegMode());
+}
+
+TESS_API void TESS_CALL tess_set_source_resolution(TessEngineHandle handle, int ppi) {
+    if (!handle) return;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    ctx->api.SetSourceResolution(ppi);
+}
+
+TESS_API int TESS_CALL tess_set_image_file(TessEngineHandle handle, const char* filepath) {
+    if (!handle || !filepath) return -1;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    ctx->cleanup_image();
+
+    // Read file bytes into memory
+    std::ifstream file(filepath, std::ios::binary | std::ios::ate);
+    if (!file.is_open()) {
+        return -1;
+    }
+    std::streamsize size = file.tellg();
+    file.seekg(0, std::ios::beg);
+    std::vector<unsigned char> file_buf(static_cast<size_t>(size));
+    if (!file.read(reinterpret_cast<char*>(file_buf.data()), size)) {
+        return -1;
+    }
+
+    return tess_set_image_bytes(handle, file_buf.data(), file_buf.size());
+}
+
+TESS_API int TESS_CALL tess_set_image_bytes(TessEngineHandle handle, const unsigned char* data, size_t length) {
+    if (!handle || !data || length == 0) return -1;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    ctx->cleanup_image();
+
+    // Decode with stb_image
+    int w = 0, h = 0, channels = 0;
+    stbi_uc* decoded = stbi_load_from_memory(data, static_cast<int>(length), &w, &h, &channels, 0);
+    if (decoded) {
+        ctx->image_w = w;
+        ctx->image_h = h;
+        ctx->image_bpp = channels;
+        ctx->raw_image_pixels.assign(decoded, decoded + (w * h * channels));
+        stbi_image_free(decoded);
+
+        ctx->api.SetImage(ctx->raw_image_pixels.data(), ctx->image_w, ctx->image_h,
+                          ctx->image_bpp, ctx->image_w * ctx->image_bpp);
+        return 0;
+    }
+
+    // Fallback: try Leptonica pixReadMem
+    Pix* pix = pixReadMem(data, length);
+    if (pix) {
+        ctx->current_pix = pix;
+        ctx->api.SetImage(pix);
+        return 0;
+    }
+
+    return -1;
+}
+
+TESS_API int TESS_CALL tess_set_image_raw(TessEngineHandle handle, const unsigned char* image_data,
+                                          int width, int height, int bytes_per_pixel, int bytes_per_line) {
+    if (!handle || !image_data || width <= 0 || height <= 0) return -1;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    ctx->cleanup_image();
+
+    ctx->image_w = width;
+    ctx->image_h = height;
+    ctx->image_bpp = bytes_per_pixel;
+    size_t total_bytes = static_cast<size_t>(bytes_per_line) * height;
+    ctx->raw_image_pixels.assign(image_data, image_data + total_bytes);
+
+    ctx->api.SetImage(ctx->raw_image_pixels.data(), width, height, bytes_per_pixel, bytes_per_line);
+    return 0;
+}
+
+TESS_API int TESS_CALL tess_recognize(TessEngineHandle handle) {
+    if (!handle) return -1;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    return ctx->api.Recognize(nullptr);
+}
+
+TESS_API char* TESS_CALL tess_get_utf8_text(TessEngineHandle handle) {
+    if (!handle) return nullptr;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    char* raw = ctx->api.GetUTF8Text();
+    if (!raw) return nullptr;
+    char* dup = duplicate_string(raw);
+    delete[] raw;
+    return dup;
+}
+
+TESS_API char* TESS_CALL tess_get_hocr_text(TessEngineHandle handle, int page_number) {
+    if (!handle) return nullptr;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    char* raw = ctx->api.GetHOCRText(page_number);
+    if (!raw) return nullptr;
+    char* dup = duplicate_string(raw);
+    delete[] raw;
+    return dup;
+}
+
+TESS_API char* TESS_CALL tess_get_tsv_text(TessEngineHandle handle, int page_number) {
+    if (!handle) return nullptr;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    char* raw = ctx->api.GetTSVText(page_number);
+    if (!raw) return nullptr;
+    char* dup = duplicate_string(raw);
+    delete[] raw;
+    return dup;
+}
+
+TESS_API char* TESS_CALL tess_get_box_text(TessEngineHandle handle, int page_number) {
+    if (!handle) return nullptr;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    char* raw = ctx->api.GetBoxText(page_number);
+    if (!raw) return nullptr;
+    char* dup = duplicate_string(raw);
+    delete[] raw;
+    return dup;
+}
+
+TESS_API char* TESS_CALL tess_get_unlv_text(TessEngineHandle handle) {
+    if (!handle) return nullptr;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    char* raw = ctx->api.GetUNLVText();
+    if (!raw) return nullptr;
+    char* dup = duplicate_string(raw);
+    delete[] raw;
+    return dup;
+}
+
+TESS_API int TESS_CALL tess_get_mean_confidence(TessEngineHandle handle) {
+    if (!handle) return 0;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    return ctx->api.MeanTextConf();
+}
+
+TESS_API void TESS_CALL tess_free_text(char* text) {
+    if (text) {
+        free(text);
+    }
+}
+
+TESS_API int TESS_CALL tess_detect_orientation_script(
+    TessEngineHandle handle,
+    int* orient_deg,
+    float* orient_conf,
+    char* script_name,
+    int script_name_max_len,
+    float* script_conf
+) {
+    if (!handle) return -1;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+
+    const char* s_name = nullptr;
+    bool ok = ctx->api.DetectOrientationScript(orient_deg, orient_conf, &s_name, script_conf);
+    if (ok) {
+        if (script_name && script_name_max_len > 0) {
+            strncpy_s(script_name, script_name_max_len, s_name ? s_name : "Unknown", _TRUNCATE);
+        }
+        return 0;
+    }
+    return -1;
+}
+
+TESS_API TessIteratorHandle TESS_CALL tess_analyse_layout(TessEngineHandle handle) {
+    if (!handle) return nullptr;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    tesseract::PageIterator* pi = ctx->api.AnalyseLayout();
+    if (!pi) return nullptr;
+
+    auto iter_ctx = new (std::nothrow) IteratorContext();
+    if (!iter_ctx) {
+        delete pi;
+        return nullptr;
+    }
+    iter_ctx->page_iter = pi;
+    iter_ctx->is_result = false;
+    return reinterpret_cast<TessIteratorHandle>(iter_ctx);
+}
+
+TESS_API TessIteratorHandle TESS_CALL tess_get_iterator(TessEngineHandle handle) {
+    if (!handle) return nullptr;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    tesseract::ResultIterator* ri = ctx->api.GetIterator();
+    if (!ri) return nullptr;
+
+    auto iter_ctx = new (std::nothrow) IteratorContext();
+    if (!iter_ctx) {
+        delete ri;
+        return nullptr;
+    }
+    iter_ctx->res_iter = ri;
+    iter_ctx->page_iter = ri;
+    iter_ctx->is_result = true;
+    return reinterpret_cast<TessIteratorHandle>(iter_ctx);
+}
+
+TESS_API int TESS_CALL tess_iterator_next(TessIteratorHandle iter, int level) {
+    if (!iter) return 0;
+    auto ctx = reinterpret_cast<IteratorContext*>(iter);
+    if (!ctx->page_iter) return 0;
+    return ctx->page_iter->Next(static_cast<tesseract::PageIteratorLevel>(level)) ? 1 : 0;
+}
+
+TESS_API int TESS_CALL tess_iterator_is_at_beginning_of(TessIteratorHandle iter, int level) {
+    if (!iter) return 0;
+    auto ctx = reinterpret_cast<IteratorContext*>(iter);
+    if (!ctx->page_iter) return 0;
+    return ctx->page_iter->IsAtBeginningOf(static_cast<tesseract::PageIteratorLevel>(level)) ? 1 : 0;
+}
+
+TESS_API int TESS_CALL tess_iterator_get_bounding_box(
+    TessIteratorHandle iter,
+    int level,
+    int* left,
+    int* top,
+    int* right,
+    int* bottom
+) {
+    if (!iter) return 0;
+    auto ctx = reinterpret_cast<IteratorContext*>(iter);
+    if (!ctx->page_iter) return 0;
+    return ctx->page_iter->BoundingBox(static_cast<tesseract::PageIteratorLevel>(level),
+                                       left, top, right, bottom) ? 1 : 0;
+}
+
+TESS_API char* TESS_CALL tess_iterator_get_text(TessIteratorHandle iter, int level) {
+    if (!iter) return nullptr;
+    auto ctx = reinterpret_cast<IteratorContext*>(iter);
+    if (!ctx->is_result || !ctx->res_iter) return nullptr;
+
+    char* raw = ctx->res_iter->GetUTF8Text(static_cast<tesseract::PageIteratorLevel>(level));
+    if (!raw) return nullptr;
+    char* dup = duplicate_string(raw);
+    delete[] raw;
+    return dup;
+}
+
+TESS_API float TESS_CALL tess_iterator_get_confidence(TessIteratorHandle iter, int level) {
+    if (!iter) return 0.0f;
+    auto ctx = reinterpret_cast<IteratorContext*>(iter);
+    if (!ctx->is_result || !ctx->res_iter) return 0.0f;
+    return ctx->res_iter->Confidence(static_cast<tesseract::PageIteratorLevel>(level));
+}
+
+TESS_API int TESS_CALL tess_iterator_get_writing_direction(TessIteratorHandle iter, int* direction) {
+    if (!iter || !direction) return -1;
+    auto ctx = reinterpret_cast<IteratorContext*>(iter);
+    if (!ctx->page_iter) return -1;
+
+    tesseract::Orientation orient;
+    tesseract::WritingDirection wdir;
+    tesseract::TextlineOrder order;
+    float deskew;
+    ctx->page_iter->Orientation(&orient, &wdir, &order, &deskew);
+    *direction = static_cast<int>(wdir);
+    return 0;
+}
+
+TESS_API int TESS_CALL tess_iterator_get_textline_order(TessIteratorHandle iter, int* order) {
+    if (!iter || !order) return -1;
+    auto ctx = reinterpret_cast<IteratorContext*>(iter);
+    if (!ctx->page_iter) return -1;
+
+    tesseract::Orientation orient;
+    tesseract::WritingDirection wdir;
+    tesseract::TextlineOrder torder;
+    float deskew;
+    ctx->page_iter->Orientation(&orient, &wdir, &torder, &deskew);
+    *order = static_cast<int>(torder);
+    return 0;
+}
+
+TESS_API int TESS_CALL tess_iterator_get_deskew_angle(TessIteratorHandle iter, float* angle) {
+    if (!iter || !angle) return -1;
+    auto ctx = reinterpret_cast<IteratorContext*>(iter);
+    if (!ctx->page_iter) return -1;
+
+    tesseract::Orientation orient;
+    tesseract::WritingDirection wdir;
+    tesseract::TextlineOrder torder;
+    ctx->page_iter->Orientation(&orient, &wdir, &torder, angle);
+    return 0;
+}
+
+TESS_API void TESS_CALL tess_iterator_destroy(TessIteratorHandle iter) {
+    if (!iter) return;
+    auto ctx = reinterpret_cast<IteratorContext*>(iter);
+    delete ctx;
+}
+
+} // extern "C"
