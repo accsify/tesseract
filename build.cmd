@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 echo =====================================================================
-echo  Accsi Tesseract Engine Standalone Monolithic DLL Builder
+echo  Accsify Tesseract Engine Standalone Monolithic DLL Builder
 echo  Target: Windows x64 ^& x86 (/MT Zero-Dependency Static Runtime)
 echo =====================================================================
 

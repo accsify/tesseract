@@ -41,6 +41,11 @@ from .osd import (
 
 from .layout import (
     LayoutElement,
+    LayoutSymbol,
+    LayoutWord,
+    LayoutLine,
+    LayoutParagraph,
+    LayoutBlock,
     PageLayout,
 )
 
@@ -50,6 +55,7 @@ from .iterator import (
 
 from .engine import (
     TesseractEngine,
+    BatchOcrResult,
 )
 
 
@@ -60,7 +66,7 @@ def image_to_string(
     datapath: str = None
 ) -> str:
     """
-    Convenient one-line OCR helper function.
+    Convenient one-line OCR helper function returning plain text.
     
     Args:
         image: Path to image file, raw bytes, or PIL Image.
@@ -78,15 +84,53 @@ def image_to_string(
         return engine.get_text()
 
 
+def image_to_json(
+    image,
+    lang: str = "eng",
+    psm: PageSegMode = PageSegMode.AUTO,
+    datapath: str = None
+) -> str:
+    """
+    Convenient one-line OCR helper function returning structured JSON.
+    """
+    with TesseractEngine(datapath=datapath, language=lang) as engine:
+        engine.set_page_seg_mode(psm)
+        engine.set_image(image)
+        engine.recognize()
+        return engine.get_json()
+
+
+def image_to_dict(
+    image,
+    lang: str = "eng",
+    psm: PageSegMode = PageSegMode.AUTO,
+    datapath: str = None
+) -> dict:
+    """
+    Convenient one-line OCR helper function returning structured Python dictionary.
+    """
+    with TesseractEngine(datapath=datapath, language=lang) as engine:
+        engine.set_page_seg_mode(psm)
+        engine.set_image(image)
+        engine.recognize()
+        return engine.get_structured_dict()
+
+
 __all__ = [
     "__version__",
     "__company__",
     "TesseractEngine",
     "TesseractIterator",
+    "BatchOcrResult",
     "ModelManager",
     "ModelInfo",
     "PageLayout",
     "LayoutElement",
+    "LayoutSymbol",
+    "LayoutWord",
+    "LayoutLine",
+    "LayoutParagraph",
+    "LayoutBlock",
     "OrientationScriptResult",
     "BoundingBox",
     "PageSegMode",
@@ -102,4 +146,6 @@ __all__ = [
     "ModelDownloadError",
     "ModelNotFoundError",
     "image_to_string",
+    "image_to_json",
+    "image_to_dict",
 ]

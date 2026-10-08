@@ -12,12 +12,6 @@
 
 #ifdef __cplusplus
 #include "tesseract_engine_cpp.hpp"
-
-namespace accsify {
-    using TesseractEngine = accsi::TesseractEngine;
-    using TesseractIterator = accsi::TesseractIterator;
-    using ModelManager = accsi::ModelManager;
-}
 #endif
 
 #endif /* ACCSIFY_TESSERACT_H */

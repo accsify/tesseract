@@ -1,6 +1,7 @@
 # Build intermediates
 build/
 build_x64/
+bin/
 *.obj
 *.res
 *.exp

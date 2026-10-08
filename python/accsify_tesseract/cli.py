@@ -6,8 +6,11 @@ Copyright (C) 2026 accsify. All rights reserved.
 """
 
 import sys
+import json
 import argparse
 from pathlib import Path
+from typing import List
+
 from .types import PageSegMode, ModelType, PageIteratorLevel, WritingDirection, TextlineOrder
 from .engine import TesseractEngine
 from .models import ModelManager
@@ -35,47 +38,79 @@ def progress_printer(model_name: str, model_type: int, downloaded: int, total: i
 
 
 def cmd_ocr(args):
-    img_path = Path(args.image)
-    if not img_path.exists():
-        print(f"[ERROR] Image file not found: {img_path}")
-        return 1
-
-    lang = args.lang
-    if not ModelManager.is_installed(lang, ModelType.FAST):
-        print(f"[*] Model '{lang}' is not installed locally. Downloading automatically...")
-        ok = ModelManager.download(lang, ModelType.FAST, progress_printer)
-        if not ok:
-            print(f"[ERROR] Failed to download model '{lang}'.")
+    images = [Path(p) for p in args.images]
+    for img in images:
+        if not img.exists():
+            print(f"[ERROR] Image file not found: {img}")
             return 1
 
+    flavor = ModelType.BEST if args.flavor == "best" else ModelType.FAST
+    ModelManager.set_flavor(flavor)
+
+    # Check and auto-download all sub-languages (e.g. "ara+eng")
+    sub_langs = [l.strip() for l in args.lang.split("+") if l.strip()]
+    for sl in sub_langs:
+        if not ModelManager.is_installed(sl, flavor):
+            print(f"[*] Model '{sl}' ({flavor.name}) is not installed locally. Downloading automatically...")
+            ok = ModelManager.download(sl, flavor, progress_printer)
+            if not ok:
+                print(f"[ERROR] Failed to download model '{sl}'.")
+                return 1
+
     psm = PageSegMode(args.psm)
-    with TesseractEngine(datapath=args.tessdata, language=lang) as tess:
+    fmt = args.format.lower()
+    is_batch = len(images) > 1
+
+    with TesseractEngine(datapath=args.tessdata, language=args.lang, flavor=flavor) as tess:
         tess.set_page_seg_mode(psm)
-        tess.set_image(img_path)
-        tess.recognize()
 
-        fmt = args.format.lower()
-        if fmt == "hocr":
-            output = tess.get_hocr()
-        elif fmt == "tsv":
-            output = tess.get_tsv()
-        elif fmt == "box":
-            output = tess.get_box()
-        elif fmt == "unlv":
-            output = tess.get_unlv()
+        batch_results = []
+        text_outputs = []
+
+        for idx, img_path in enumerate(images):
+            print(f"[*] Processing ({idx + 1}/{len(images)}): {img_path} (Lang: {args.lang}, Flavor: {flavor.name}, PSM: {psm.value})...")
+            tess.set_image(img_path)
+            tess.recognize()
+
+            mean_conf = tess.get_mean_confidence()
+            print(f"    [+] Mean Confidence: {mean_conf}%")
+
+            if fmt == "json":
+                structured = tess.get_structured_dict()
+                if is_batch:
+                    batch_results.append({
+                        "image": str(img_path),
+                        "result": structured
+                    })
+                else:
+                    batch_results = structured
+            elif fmt == "hocr":
+                text_outputs.append(tess.get_hocr())
+            elif fmt == "tsv":
+                text_outputs.append(tess.get_tsv())
+            elif fmt == "box":
+                text_outputs.append(tess.get_box())
+            elif fmt == "unlv":
+                text_outputs.append(tess.get_unlv())
+            else:
+                txt = tess.get_text()
+                if is_batch:
+                    text_outputs.append(f"=== Image: {img_path} (Confidence: {mean_conf}%) ===\n{txt}")
+                else:
+                    text_outputs.append(txt)
+
+        if fmt == "json":
+            final_output = json.dumps(batch_results, ensure_ascii=False, indent=2)
         else:
-            output = tess.get_text()
-
-        mean_conf = tess.get_mean_confidence()
-        print(f"[*] Mean Recognition Confidence: {mean_conf}%")
+            final_output = "\n\n".join(text_outputs)
 
         if args.output:
             out_p = Path(args.output)
-            out_p.write_text(output, encoding="utf-8")
+            out_p.write_text(final_output, encoding="utf-8")
             print(f"[OK] Saved output to: {out_p}")
         else:
             print("\n----------------------- Recognized Output -----------------------")
-            print(output)
+            print(final_output)
             print("-----------------------------------------------------------------")
     return 0
 
@@ -89,6 +124,10 @@ def cmd_layout(args):
     with TesseractEngine(datapath=args.tessdata, language=args.lang) as tess:
         tess.set_image(img_path)
         layout = tess.analyse_layout(level=PageIteratorLevel.WORD)
+
+        if args.format == "json":
+            print(layout.to_json(indent=2))
+            return 0
 
         print("\n=== Page Layout Analysis: Words, Boxes & Writing Direction ===")
         print(f"{'Text':<30} {'Conf':<10} {'Bounding Box (L,T,R,B)':<25} {'Direction':<15} Order")
@@ -124,6 +163,10 @@ def cmd_osd(args):
         tess.set_page_seg_mode(PageSegMode.OSD_ONLY)
         tess.set_image(img_path)
         res = tess.detect_orientation_and_script()
+
+        if getattr(args, "format", "txt") == "json":
+            print(res.to_json(indent=2))
+            return 0
 
         print("\n=== Orientation & Script Detection (OSD) Result ===")
         print(f"  Detected Orientation : {res.orientation_deg} degrees (Confidence: {res.orientation_confidence:.2f})")
@@ -192,23 +235,26 @@ def main():
     subparsers = parser.add_subparsers(dest="command", help="Command to execute")
 
     # OCR
-    p_ocr = subparsers.add_parser("ocr", help="Run OCR on an image")
-    p_ocr.add_argument("image", help="Path to input image")
-    p_ocr.add_argument("-l", "--lang", default="eng", help="OCR language code (default: eng)")
-    p_ocr.add_argument("-o", "--output", help="Write output text to file")
-    p_ocr.add_argument("--format", default="txt", choices=["txt", "hocr", "tsv", "box", "unlv"], help="Output format")
-    p_ocr.add_argument("--psm", type=int, default=3, help="Page segmentation mode (default: 3)")
+    p_ocr = subparsers.add_parser("ocr", help="Run OCR on one or multiple images")
+    p_ocr.add_argument("images", nargs="+", help="One or more image paths to process")
+    p_ocr.add_argument("-l", "--lang", default="eng", help="OCR language code (e.g. eng, ara, ara+eng, fra)")
+    p_ocr.add_argument("--flavor", default="fast", choices=["fast", "best"], help="Model flavor: fast or best (default: fast)")
+    p_ocr.add_argument("-o", "--output", help="Write output text or JSON to file")
+    p_ocr.add_argument("--format", default="txt", choices=["txt", "json", "hocr", "tsv", "box", "unlv"], help="Output format (default: txt)")
+    p_ocr.add_argument("--psm", type=int, default=3, help="Page segmentation mode (default: 3 AUTO)")
     p_ocr.add_argument("--tessdata", help="Custom tessdata directory path")
 
     # Layout
     p_layout = subparsers.add_parser("layout", help="Inspect layout: words, boxes, writing direction")
     p_layout.add_argument("image", help="Path to input image")
     p_layout.add_argument("-l", "--lang", default="eng", help="OCR language code")
+    p_layout.add_argument("--format", default="txt", choices=["txt", "json"], help="Output format (default: txt)")
     p_layout.add_argument("--tessdata", help="Custom tessdata directory path")
 
     # OSD
     p_osd = subparsers.add_parser("osd", help="Detect orientation and script")
     p_osd.add_argument("image", help="Path to input image")
+    p_osd.add_argument("--format", default="txt", choices=["txt", "json"], help="Output format (default: txt)")
     p_osd.add_argument("--tessdata", help="Custom tessdata directory path")
 
     # Models

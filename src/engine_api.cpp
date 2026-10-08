@@ -1,8 +1,8 @@
 /**
  * @file engine_api.cpp
  * @brief Complete C ABI implementation for Tesseract OCR, Layout Analysis, OSD, and Formatting.
- * @company accsi
- * @copyright Copyright (C) 2026 accsi. All rights reserved.
+ * @company accsify
+ * @copyright Copyright (C) 2026 accsify. All rights reserved.
  */
 
 #include "tesseract_engine.h"
@@ -29,10 +29,9 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 
-namespace accsi {
-    std::string get_active_model_path();
-}
+namespace accsify {
 
 struct EngineContext {
     tesseract::TessBaseAPI api;
@@ -90,6 +89,36 @@ static char* duplicate_string(const char* src) {
     return copy;
 }
 
+static std::string escape_json_string(const std::string& input) {
+    std::string out;
+    out.reserve(input.size() + 16);
+    for (char c : input) {
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\b': out += "\\b"; break;
+            case '\f': out += "\\f"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    char hex[8];
+                    snprintf(hex, sizeof(hex), "\\u%04x", static_cast<unsigned char>(c));
+                    out += hex;
+                } else {
+                    out += c;
+                }
+                break;
+        }
+    }
+    return out;
+}
+
+} // namespace accsify
+
+using namespace accsify;
+
 extern "C" {
 
 TESS_API const char* TESS_CALL tess_version(void) {
@@ -116,9 +145,39 @@ TESS_API int TESS_CALL tess_init(TessEngineHandle handle, const char* datapath, 
     if (datapath && datapath[0] != '\0') {
         path = datapath;
     } else {
-        char buf[512] = {0};
-        tess_model_get_path(buf, sizeof(buf));
-        path = buf;
+        char base_buf[512] = {0};
+        tess_model_get_path(base_buf, sizeof(base_buf));
+        path = base_buf;
+
+        // Extract primary language in case of combination e.g. "ara+eng" -> "ara"
+        const char* l_str = (language && language[0] != '\0') ? language : "eng";
+        std::string primary_lang = l_str;
+        size_t plus_pos = primary_lang.find('+');
+        if (plus_pos != std::string::npos) {
+            primary_lang = primary_lang.substr(0, plus_pos);
+        }
+
+        // Check if model file exists in current flavor path
+        int active_flavor = tess_model_get_flavor();
+        char flavor_buf[512] = {0};
+        tess_model_get_flavor_path(active_flavor, flavor_buf, sizeof(flavor_buf));
+        std::string candidate = std::string(flavor_buf) + "\\" + primary_lang + ".traineddata";
+        DWORD attr = GetFileAttributesA(candidate.c_str());
+        if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+            path = flavor_buf;
+        } else {
+            // Check other flavors
+            for (int f = 0; f <= 3; ++f) {
+                char f_buf[512] = {0};
+                tess_model_get_flavor_path(f, f_buf, sizeof(f_buf));
+                std::string f_cand = std::string(f_buf) + "\\" + primary_lang + ".traineddata";
+                DWORD f_attr = GetFileAttributesA(f_cand.c_str());
+                if (f_attr != INVALID_FILE_ATTRIBUTES && !(f_attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                    path = f_buf;
+                    break;
+                }
+            }
+        }
     }
 
     const char* lang = (language && language[0] != '\0') ? language : "eng";
@@ -293,6 +352,78 @@ TESS_API char* TESS_CALL tess_get_unlv_text(TessEngineHandle handle) {
     char* dup = duplicate_string(raw);
     delete[] raw;
     return dup;
+}
+
+TESS_API char* TESS_CALL tess_get_json_text(TessEngineHandle handle) {
+    if (!handle) return nullptr;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+
+    ctx->api.Recognize(nullptr);
+
+    char* full_text = ctx->api.GetUTF8Text();
+    std::string text_str = full_text ? full_text : "";
+    if (full_text) delete[] full_text;
+
+    int mean_conf = ctx->api.MeanTextConf();
+    int psm = static_cast<int>(ctx->api.GetPageSegMode());
+
+    std::ostringstream json;
+    json << "{\n";
+    json << "  \"text\": \"" << escape_json_string(text_str) << "\",\n";
+    json << "  \"mean_confidence\": " << mean_conf << ",\n";
+    json << "  \"psm\": " << psm << ",\n";
+    json << "  \"words\": [\n";
+
+    tesseract::ResultIterator* ri = ctx->api.GetIterator();
+    bool first_word = true;
+    if (ri) {
+        do {
+            char* word_txt = ri->GetUTF8Text(tesseract::RIL_WORD);
+            if (!word_txt) continue;
+            std::string w_str = word_txt;
+            delete[] word_txt;
+
+            // Trim whitespace
+            size_t start = w_str.find_first_not_of(" \t\r\n");
+            if (start == std::string::npos) continue;
+            size_t end = w_str.find_last_not_of(" \t\r\n");
+            w_str = w_str.substr(start, end - start + 1);
+            if (w_str.empty()) continue;
+
+            float conf = ri->Confidence(tesseract::RIL_WORD);
+            int left = 0, top = 0, right = 0, bottom = 0;
+            ri->BoundingBox(tesseract::RIL_WORD, &left, &top, &right, &bottom);
+
+            tesseract::Orientation orient;
+            tesseract::WritingDirection wdir;
+            tesseract::TextlineOrder torder;
+            float deskew = 0.0f;
+            ri->Orientation(&orient, &wdir, &torder, &deskew);
+
+            std::string dir_str = (wdir == tesseract::WRITING_DIRECTION_RIGHT_TO_LEFT) ? "RightToLeft" :
+                                  ((wdir == tesseract::WRITING_DIRECTION_TOP_TO_BOTTOM) ? "TopToBottom" : "LeftToRight");
+            std::string order_str = (torder == tesseract::TEXTLINE_ORDER_RIGHT_TO_LEFT) ? "RTL" :
+                                    ((torder == tesseract::TEXTLINE_ORDER_TOP_TO_BOTTOM) ? "TTB" : "LTR");
+
+            if (!first_word) json << ",\n";
+            first_word = false;
+
+            json << "    {\n";
+            json << "      \"text\": \"" << escape_json_string(w_str) << "\",\n";
+            json << "      \"confidence\": " << conf << ",\n";
+            json << "      \"bbox\": [" << left << ", " << top << ", " << right << ", " << bottom << "],\n";
+            json << "      \"direction\": \"" << dir_str << "\",\n";
+            json << "      \"order\": \"" << order_str << "\",\n";
+            json << "      \"deskew_angle\": " << deskew << "\n";
+            json << "    }";
+        } while (ri->Next(tesseract::RIL_WORD));
+        delete ri;
+    }
+
+    json << "\n  ]\n}";
+
+    std::string final_json = json.str();
+    return duplicate_string(final_json.c_str());
 }
 
 TESS_API int TESS_CALL tess_get_mean_confidence(TessEngineHandle handle) {

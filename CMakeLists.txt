@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(accsi_tesseract_engine
+project(accsify_tesseract_engine
     VERSION 5.5.0.1
     LANGUAGES C CXX
 )

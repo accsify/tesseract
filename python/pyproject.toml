@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "accsify-tesseract"
+version = "5.5.0.1"
+description = "Official Python SDK and CLI for the Accsify Monolithic Tesseract OCR Engine"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [
+    { name = "accsify", email = "contact@accsify.com" }
+]
+keywords = ["ocr", "tesseract", "text-recognition", "computer-vision", "accsify", "layout-analysis"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+]
+
+[project.scripts]
+accsify-tesseract = "accsify_tesseract.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/accsify/tesseract"
+Documentation = "https://github.com/accsify/tesseract#readme"
+Repository = "https://github.com/accsify/tesseract.git"
+Issues = "https://github.com/accsify/tesseract/issues"

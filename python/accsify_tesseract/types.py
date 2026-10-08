@@ -85,3 +85,19 @@ class BoundingBox:
 
     def as_tuple(self) -> tuple:
         return (self.left, self.top, self.right, self.bottom)
+
+    def to_tuple(self) -> tuple:
+        return (self.left, self.top, self.right, self.bottom)
+
+    def to_list(self) -> list:
+        return [self.left, self.top, self.right, self.bottom]
+
+    def to_dict(self) -> dict:
+        return {
+            "left": self.left,
+            "top": self.top,
+            "right": self.right,
+            "bottom": self.bottom,
+            "width": self.width,
+            "height": self.height,
+        }

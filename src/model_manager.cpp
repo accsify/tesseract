@@ -1,8 +1,8 @@
 /**
  * @file model_manager.cpp
- * @brief Model path management, catalog queries, and download dispatching.
- * @company accsi
- * @copyright Copyright (C) 2026 accsi. All rights reserved.
+ * @brief Model path management, flavor organization, catalog queries, and download dispatching.
+ * @company accsify
+ * @copyright Copyright (C) 2026 accsify. All rights reserved.
  */
 
 #include "tesseract_engine.h"
@@ -15,10 +15,12 @@
 #include <memory>
 #include <cstring>
 #include <algorithm>
+#include <thread>
+#include <atomic>
 
 #pragma comment(lib, "shlwapi.lib")
 
-namespace accsi {
+namespace accsify {
 
 int perform_download(
     const std::string& url_str,
@@ -72,33 +74,117 @@ public:
         m_custom_path = path;
     }
 
-    void ensure_directory(const std::string& path) {
-        CreateDirectoryA(path.c_str(), NULL);
+    void set_flavor(int flavor) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_flavor = flavor;
     }
 
-    std::string get_model_filename(const std::string& model_name) {
+    int get_flavor() {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_flavor;
+    }
+
+    std::string get_flavor_subdir(int flavor) {
+        switch (flavor) {
+            case TESS_MODEL_TYPE_FAST:     return "fast";
+            case TESS_MODEL_TYPE_BEST:     return "best";
+            case TESS_MODEL_TYPE_STANDARD: return "standard";
+            case TESS_MODEL_TYPE_SCRIPT:   return "script";
+            default:                       return "fast";
+        }
+    }
+
+    std::string get_flavor_dir(int flavor) {
+        std::string base = get_active_path();
+        char combined[MAX_PATH] = {0};
+        std::string sub = get_flavor_subdir(flavor);
+        PathCombineA(combined, base.c_str(), sub.c_str());
+        return std::string(combined);
+    }
+
+    void ensure_directory(const std::string& path) {
+        if (path.empty()) return;
+        char temp[MAX_PATH] = {0};
+        strncpy_s(temp, sizeof(temp), path.c_str(), _TRUNCATE);
+        for (char* p = temp + 1; *p; ++p) {
+            if (*p == '\\' || *p == '/') {
+                char orig = *p;
+                *p = '\0';
+                CreateDirectoryA(temp, NULL);
+                *p = orig;
+            }
+        }
+        CreateDirectoryA(temp, NULL);
+    }
+
+    std::string normalize_model_basename(const std::string& model_name) {
         std::string fname = model_name;
-        // If script/Arabic -> script\\Arabic
-        std::replace(fname.begin(), fname.end(), '/', '\\');
+        if (fname.rfind("script/", 0) == 0) {
+            fname = fname.substr(7);
+        } else if (fname.rfind("script\\", 0) == 0) {
+            fname = fname.substr(7);
+        }
         if (fname.size() < 12 || fname.substr(fname.size() - 12) != ".traineddata") {
             fname += ".traineddata";
         }
         return fname;
     }
 
-    std::string get_full_model_path(const std::string& model_name) {
-        std::string dir = get_active_path();
-        std::string rel = get_model_filename(model_name);
+    std::string get_full_model_path_for_storage(const std::string& model_name, int model_type) {
+        std::string base = get_active_path();
+        std::string fname = normalize_model_basename(model_name);
 
         char combined[MAX_PATH] = {0};
-        PathCombineA(combined, dir.c_str(), rel.c_str());
+        if (model_name.rfind("script/", 0) == 0 || model_name.rfind("script\\", 0) == 0 || model_type == TESS_MODEL_TYPE_SCRIPT) {
+            std::string s_dir = base + "\\script";
+            PathCombineA(combined, s_dir.c_str(), fname.c_str());
+        } else {
+            std::string sub = get_flavor_subdir(model_type);
+            std::string sub_dir = base + "\\" + sub;
+            PathCombineA(combined, sub_dir.c_str(), fname.c_str());
+        }
         return std::string(combined);
     }
 
-    bool is_installed(const std::string& model_name) {
-        std::string full_path = get_full_model_path(model_name);
+    bool file_exists(const std::string& full_path) {
         DWORD attr = GetFileAttributesA(full_path.c_str());
         return (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY));
+    }
+
+    bool is_installed(const std::string& model_name, int model_type = -1) {
+        std::string base = get_active_path();
+        std::string fname = normalize_model_basename(model_name);
+
+        // 1. Check in specific flavor subdirectory if specified
+        if (model_type >= 0) {
+            std::string flavor_path = get_full_model_path_for_storage(model_name, model_type);
+            if (file_exists(flavor_path)) return true;
+        }
+
+        // 2. Check current active flavor
+        {
+            std::string cur_flavor_path = get_full_model_path_for_storage(model_name, get_flavor());
+            if (file_exists(cur_flavor_path)) return true;
+        }
+
+        // 3. Check flat base directory
+        char flat_combined[MAX_PATH] = {0};
+        PathCombineA(flat_combined, base.c_str(), fname.c_str());
+        if (file_exists(flat_combined)) return true;
+
+        // 4. Check script subdirectory if applicable
+        char script_combined[MAX_PATH] = {0};
+        std::string script_dir = base + "\\script";
+        PathCombineA(script_combined, script_dir.c_str(), fname.c_str());
+        if (file_exists(script_combined)) return true;
+
+        // 5. Check other flavors
+        for (int t = 0; t <= 3; ++t) {
+            std::string other_path = get_full_model_path_for_storage(model_name, t);
+            if (file_exists(other_path)) return true;
+        }
+
+        return false;
     }
 
     std::vector<const CatalogEntry*> filter_catalog(int model_type) {
@@ -122,11 +208,8 @@ public:
         return nullptr;
     }
 
-    std::vector<std::string> scan_installed() {
-        std::vector<std::string> results;
-        std::string base_dir = get_active_path();
-        std::string search_pattern = base_dir + "\\*.traineddata";
-
+    static void scan_directory_models(const std::string& dir_path, const std::string& prefix, std::vector<std::string>& results) {
+        std::string search_pattern = dir_path + "\\*.traineddata";
         WIN32_FIND_DATAA fd;
         HANDLE hFind = FindFirstFileA(search_pattern.c_str(), &fd);
         if (hFind != INVALID_HANDLE_VALUE) {
@@ -134,40 +217,45 @@ public:
                 if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
                     std::string fname = fd.cFileName;
                     if (fname.size() > 12 && fname.substr(fname.size() - 12) == ".traineddata") {
-                        results.push_back(fname.substr(0, fname.size() - 12));
+                        std::string base_id = fname.substr(0, fname.size() - 12);
+                        if (!prefix.empty()) {
+                            results.push_back(prefix + "/" + base_id);
+                        } else {
+                            results.push_back(base_id);
+                        }
                     }
                 }
             } while (FindNextFileA(hFind, &fd));
             FindClose(hFind);
         }
+    }
 
-        // Also check script/ subfolder
-        std::string script_pattern = base_dir + "\\script\\*.traineddata";
-        hFind = FindFirstFileA(script_pattern.c_str(), &fd);
-        if (hFind != INVALID_HANDLE_VALUE) {
-            do {
-                if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-                    std::string fname = fd.cFileName;
-                    if (fname.size() > 12 && fname.substr(fname.size() - 12) == ".traineddata") {
-                        results.push_back("script/" + fname.substr(0, fname.size() - 12));
-                    }
-                }
-            } while (FindNextFileA(hFind, &fd));
-            FindClose(hFind);
-        }
+    std::vector<std::string> scan_installed() {
+        std::vector<std::string> results;
+        std::string base_dir = get_active_path();
+
+        // 1. Root tessdata
+        scan_directory_models(base_dir, "", results);
+
+        // 2. Flavor subdirectories
+        scan_directory_models(base_dir + "\\fast", "fast", results);
+        scan_directory_models(base_dir + "\\best", "best", results);
+        scan_directory_models(base_dir + "\\standard", "standard", results);
+        scan_directory_models(base_dir + "\\script", "script", results);
 
         return results;
     }
 
 private:
-    ModelManagerImpl() = default;
+    ModelManagerImpl() : m_flavor(TESS_MODEL_TYPE_FAST) {}
     std::mutex m_mutex;
     std::string m_custom_path;
+    int m_flavor;
 };
 
-} // namespace accsi
+} // namespace accsify
 
-using namespace accsi;
+using namespace accsify;
 
 extern "C" {
 
@@ -194,10 +282,24 @@ TESS_API int TESS_CALL tess_model_get_default_path(char* buffer, int max_len) {
     return 0;
 }
 
+TESS_API void TESS_CALL tess_model_set_flavor(int model_type) {
+    ModelManagerImpl::instance().set_flavor(model_type);
+}
+
+TESS_API int TESS_CALL tess_model_get_flavor(void) {
+    return ModelManagerImpl::instance().get_flavor();
+}
+
+TESS_API int TESS_CALL tess_model_get_flavor_path(int model_type, char* buffer, int max_len) {
+    if (!buffer || max_len <= 0) return -1;
+    std::string p = ModelManagerImpl::instance().get_flavor_dir(model_type);
+    strncpy_s(buffer, max_len, p.c_str(), _TRUNCATE);
+    return 0;
+}
+
 TESS_API int TESS_CALL tess_model_is_installed(const char* model_name, int model_type) {
-    (void)model_type;
     if (!model_name) return 0;
-    return ModelManagerImpl::instance().is_installed(model_name) ? 1 : 0;
+    return ModelManagerImpl::instance().is_installed(model_name, model_type) ? 1 : 0;
 }
 
 TESS_API int TESS_CALL tess_model_get_catalog_count(int model_type) {
@@ -216,7 +318,7 @@ TESS_API int TESS_CALL tess_model_get_catalog_item(int model_type, int index, Te
     out_info->model_type = entry->model_type;
     out_info->file_size = entry->file_size;
     strncpy_s(out_info->download_url, sizeof(out_info->download_url), entry->url, _TRUNCATE);
-    out_info->is_installed = ModelManagerImpl::instance().is_installed(entry->name) ? 1 : 0;
+    out_info->is_installed = ModelManagerImpl::instance().is_installed(entry->name, entry->model_type) ? 1 : 0;
 
     return 0;
 }
@@ -233,28 +335,35 @@ TESS_API int TESS_CALL tess_model_download(
     if (entry) {
         url = entry->url;
     } else {
-        // Construct default fallback URL
+        // Construct fallback URL based on type
+        std::string basename = ModelManagerImpl::instance().normalize_model_basename(model_name);
         if (model_type == TESS_MODEL_TYPE_BEST) {
-            url = std::string("https://github.com/tesseract-ocr/tessdata_best/raw/main/") + model_name + ".traineddata";
+            url = std::string("https://github.com/tesseract-ocr/tessdata_best/raw/main/") + basename;
         } else if (model_type == TESS_MODEL_TYPE_STANDARD) {
-            url = std::string("https://github.com/tesseract-ocr/tessdata/raw/main/") + model_name + ".traineddata";
+            url = std::string("https://github.com/tesseract-ocr/tessdata/raw/main/") + basename;
         } else {
-            url = std::string("https://github.com/tesseract-ocr/tessdata_fast/raw/main/") + model_name + ".traineddata";
+            url = std::string("https://github.com/tesseract-ocr/tessdata_fast/raw/main/") + basename;
         }
     }
 
-    std::string dest_dir = ModelManagerImpl::instance().get_active_path();
-    ModelManagerImpl::instance().ensure_directory(dest_dir);
+    std::string full_dest = ModelManagerImpl::instance().get_full_model_path_for_storage(model_name, model_type);
+    char dir_only[MAX_PATH] = {0};
+    strncpy_s(dir_only, sizeof(dir_only), full_dest.c_str(), _TRUNCATE);
+    PathRemoveFileSpecA(dir_only);
+    ModelManagerImpl::instance().ensure_directory(dir_only);
 
-    // If script/... ensure script/ directory exists
-    std::string mname(model_name);
-    if (mname.rfind("script/", 0) == 0) {
-        std::string script_dir = dest_dir + "\\script";
-        ModelManagerImpl::instance().ensure_directory(script_dir);
+    int dl_res = perform_download(url, full_dest, model_name, model_type, callback, user_data, nullptr);
+    if (dl_res == 0) {
+        // Also copy to root tessdata if it doesn't exist yet, guaranteeing single-path fallback
+        std::string base = ModelManagerImpl::instance().get_active_path();
+        std::string fname = ModelManagerImpl::instance().normalize_model_basename(model_name);
+        char flat_dest[MAX_PATH] = {0};
+        PathCombineA(flat_dest, base.c_str(), fname.c_str());
+        if (!ModelManagerImpl::instance().file_exists(flat_dest)) {
+            CopyFileA(full_dest.c_str(), flat_dest, FALSE);
+        }
     }
-
-    std::string full_dest = ModelManagerImpl::instance().get_full_model_path(model_name);
-    return perform_download(url, full_dest, model_name, model_type, callback, user_data, nullptr);
+    return dl_res;
 }
 
 TESS_API int TESS_CALL tess_model_download_async(
@@ -270,16 +379,36 @@ TESS_API int TESS_CALL tess_model_download_async(
 
     ctx->worker = std::thread([ctx, m_name, model_type, callback, user_data]() {
         const CatalogEntry* entry = ModelManagerImpl::instance().find_catalog_entry(m_name, model_type);
-        std::string url = entry ? entry->url : ("https://github.com/tesseract-ocr/tessdata_fast/raw/main/" + m_name + ".traineddata");
-
-        std::string dest_dir = ModelManagerImpl::instance().get_active_path();
-        ModelManagerImpl::instance().ensure_directory(dest_dir);
-        if (m_name.rfind("script/", 0) == 0) {
-            ModelManagerImpl::instance().ensure_directory(dest_dir + "\\script");
+        std::string url;
+        if (entry) {
+            url = entry->url;
+        } else {
+            std::string basename = ModelManagerImpl::instance().normalize_model_basename(m_name);
+            if (model_type == TESS_MODEL_TYPE_BEST) {
+                url = std::string("https://github.com/tesseract-ocr/tessdata_best/raw/main/") + basename;
+            } else if (model_type == TESS_MODEL_TYPE_STANDARD) {
+                url = std::string("https://github.com/tesseract-ocr/tessdata/raw/main/") + basename;
+            } else {
+                url = std::string("https://github.com/tesseract-ocr/tessdata_fast/raw/main/") + basename;
+            }
         }
 
-        std::string full_dest = ModelManagerImpl::instance().get_full_model_path(m_name);
-        perform_download(url, full_dest, m_name, model_type, callback, user_data, &ctx->cancelled);
+        std::string full_dest = ModelManagerImpl::instance().get_full_model_path_for_storage(m_name, model_type);
+        char dir_only[MAX_PATH] = {0};
+        strncpy_s(dir_only, sizeof(dir_only), full_dest.c_str(), _TRUNCATE);
+        PathRemoveFileSpecA(dir_only);
+        ModelManagerImpl::instance().ensure_directory(dir_only);
+
+        int dl_res = perform_download(url, full_dest, m_name, model_type, callback, user_data, &ctx->cancelled);
+        if (dl_res == 0) {
+            std::string base = ModelManagerImpl::instance().get_active_path();
+            std::string fname = ModelManagerImpl::instance().normalize_model_basename(m_name);
+            char flat_dest[MAX_PATH] = {0};
+            PathCombineA(flat_dest, base.c_str(), fname.c_str());
+            if (!ModelManagerImpl::instance().file_exists(flat_dest)) {
+                CopyFileA(full_dest.c_str(), flat_dest, FALSE);
+            }
+        }
     });
 
     *out_handle = reinterpret_cast<TessDownloadHandle>(ctx);

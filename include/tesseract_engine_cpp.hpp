@@ -1,12 +1,12 @@
 /**
  * @file tesseract_engine_cpp.hpp
- * @brief High-level C++ RAII wrapper for the Accsi Tesseract OCR Engine.
- * @company accsi
- * @copyright Copyright (C) 2026 accsi. All rights reserved.
+ * @brief High-level C++ RAII wrapper for the Accsify Tesseract OCR Engine.
+ * @company accsify
+ * @copyright Copyright (C) 2026 accsify. All rights reserved.
  */
 
-#ifndef ACCSI_TESSERACT_ENGINE_CPP_HPP
-#define ACCSI_TESSERACT_ENGINE_CPP_HPP
+#ifndef ACCSIFY_TESSERACT_ENGINE_CPP_HPP
+#define ACCSIFY_TESSERACT_ENGINE_CPP_HPP
 
 #include "tesseract_engine.h"
 #include <string>
@@ -15,7 +15,7 @@
 #include <stdexcept>
 #include <functional>
 
-namespace accsi {
+namespace accsify {
 
 class TesseractIterator {
 public:
@@ -208,6 +208,22 @@ public:
         return s;
     }
 
+    std::string get_unlv_text() const {
+        char* text = tess_get_unlv_text(m_handle);
+        if (!text) return "";
+        std::string s(text);
+        tess_free_text(text);
+        return s;
+    }
+
+    std::string get_json_text() const {
+        char* text = tess_get_json_text(m_handle);
+        if (!text) return "{}";
+        std::string s(text);
+        tess_free_text(text);
+        return s;
+    }
+
     int get_mean_confidence() const {
         return tess_get_mean_confidence(m_handle);
     }
@@ -262,6 +278,20 @@ public:
         return std::string(buf);
     }
 
+    static void set_flavor(TessModelType type) {
+        tess_model_set_flavor(static_cast<int>(type));
+    }
+
+    static TessModelType get_flavor() {
+        return static_cast<TessModelType>(tess_model_get_flavor());
+    }
+
+    static std::string get_flavor_path(TessModelType type) {
+        char buf[512] = {0};
+        tess_model_get_flavor_path(static_cast<int>(type), buf, sizeof(buf));
+        return std::string(buf);
+    }
+
     static bool is_installed(const std::string& model_name, TessModelType type = TESS_MODEL_TYPE_FAST) {
         return tess_model_is_installed(model_name.c_str(), static_cast<int>(type)) != 0;
     }
@@ -292,6 +322,8 @@ public:
     }
 };
 
-} // namespace accsi
+} // namespace accsify
 
-#endif /* ACCSI_TESSERACT_ENGINE_CPP_HPP */
+namespace accsi = accsify;
+
+#endif /* ACCSIFY_TESSERACT_ENGINE_CPP_HPP */

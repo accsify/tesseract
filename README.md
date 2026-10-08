@@ -67,9 +67,12 @@ d:\projects\c++\tesseract\
 ├── update_sources.cmd              # Source updater: checks out or upgrades Tesseract/Leptonica
 ├── CMakeLists.txt                  # Unified CMake configuration
 ├── version.rc                      # Windows resource file branded for "accsify"
+├── docs/                           # Documentation
+│   └── CLI_README.md               # Dedicated Standalone CLI Reference Manual
 ├── dist/                           # Final distribution artifacts ready for deployment
+│   ├── CLI_README.md               # Bundled CLI documentation for distribution
 │   ├── x64/
-│   │   ├── tesseract_engine.dll    # 64-bit standalone monolithic DLL (3.2 MB)
+│   │   ├── tesseract_engine.dll    # 64-bit standalone monolithic DLL (3.3 MB)
 │   │   ├── tesseract_engine.lib    # 64-bit import library
 │   │   └── tesseract_cli.exe       # 64-bit CLI executable
 │   ├── x86/
@@ -88,28 +91,32 @@ d:\projects\c++\tesseract\
 │   └── include.h
 ├── src/                            # Native C++ source files
 │   ├── dllmain.cpp                 # DLL entry point
-│   ├── engine_api.cpp              # OCR, layout, OSD, text format exports
-│   ├── model_manager.cpp           # Path & catalog management
+│   ├── engine_api.cpp              # OCR, layout, OSD, JSON & text format exports
+│   ├── model_manager.cpp           # Flavor & storage path management
 │   ├── downloader_winhttp.cpp      # Native Windows WinHTTP streaming downloader
 │   ├── model_catalog_data.h        # 75+ official language & script models catalog
-│   ├── cli_main.cpp                # Native C++ CLI implementation
+│   ├── cli_main.cpp                # Native C++ CLI implementation (batch, JSON)
 │   ├── stb_image.h                 # Embedded PNG/JPG/BMP decoders
 │   └── stb_image_write.h
-├── python/                         # Official Python package & tools
+├── python/                         # Official PyPI Python package (accsify-tesseract)
+│   ├── README.md                   # Dedicated Python package documentation
+│   ├── pyproject.toml              # PEP 517/518 build definition
+│   ├── setup.py                    # Setuptools setup configuration
+│   ├── setup.cfg                   # PyPI metadata configuration
+│   ├── MANIFEST.in                 # Package inclusion manifest
+│   ├── LICENSE                     # MIT License
 │   ├── accsify_tesseract/          # Modular Python package
-│   │   ├── __init__.py             # Public exports & image_to_string()
+│   │   ├── py.typed                # PEP 561 type annotation marker
+│   │   ├── __init__.py             # Public exports & image_to_string/json/dict
 │   │   ├── core.py                 # Low-level ctypes bindings & DLL loader
-│   │   ├── types.py                # Enums (PageSegMode, WritingDirection, etc.)
+│   │   ├── types.py                # Enums (PageSegMode, WritingDirection, ModelType)
 │   │   ├── exceptions.py           # Custom exception hierarchy
-│   │   ├── engine.py               # TesseractEngine OOP context manager
-│   │   ├── layout.py               # PageLayout, LayoutWord, BoundingBox
-│   │   ├── osd.py                  # OrientationScriptResult
+│   │   ├── engine.py               # TesseractEngine OOP context manager & batch
+│   │   ├── layout.py               # PageLayout, LayoutWord, BoundingBox (.to_json)
+│   │   ├── osd.py                  # OrientationScriptResult (.to_json)
 │   │   ├── iterator.py             # TesseractIterator cursor
 │   │   ├── models.py               # ModelManager & live downloader
 │   │   └── cli.py                  # Python CLI implementation
-│   ├── tesseract_cli.py            # CLI entrypoint runner
-│   ├── tesseract_engine.py         # Backward-compatibility module
-│   ├── setup.py                    # pip installable package definition
 │   └── examples/
 │       ├── ocr_basic.py            # Basic OCR demo
 │       ├── layout_and_script.py    # Layout & script direction demo
@@ -356,6 +363,7 @@ int tess_recognize(TessEngineHandle handle);
 
 // Must be freed with tess_free_text()
 char* tess_get_utf8_text(TessEngineHandle handle);
+char* tess_get_json_text(TessEngineHandle handle);   // Native JSON format with layout hierarchy
 char* tess_get_hocr_text(TessEngineHandle handle, int page_number);
 char* tess_get_tsv_text(TessEngineHandle handle, int page_number);
 char* tess_get_box_text(TessEngineHandle handle, int page_number);
@@ -392,6 +400,12 @@ void tess_iterator_destroy(TessIteratorHandle iter);
 int tess_model_set_path(const char* path);
 int tess_model_get_path(char* buffer, int max_len);
 int tess_model_get_default_path(char* buffer, int max_len);
+
+// Model Flavor Management (FAST, BEST, STANDARD, SCRIPT)
+void tess_model_set_flavor(int model_type);
+int tess_model_get_flavor(void);
+int tess_model_get_flavor_path(int model_type, char* buffer, int max_len);
+
 int tess_model_is_installed(const char* model_name, int model_type);
 
 // Online catalog

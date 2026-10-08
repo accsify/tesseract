@@ -1,16 +1,16 @@
 /**
  * @file model_catalog_data.h
  * @brief Catalog of official Tesseract models (fast, best, standard, scripts).
- * @company accsi
- * @copyright Copyright (C) 2026 accsi. All rights reserved.
+ * @company accsify
+ * @copyright Copyright (C) 2026 accsify. All rights reserved.
  */
 
-#ifndef ACCSI_MODEL_CATALOG_DATA_H
-#define ACCSI_MODEL_CATALOG_DATA_H
+#ifndef ACCSIFY_MODEL_CATALOG_DATA_H
+#define ACCSIFY_MODEL_CATALOG_DATA_H
 
 #include "tesseract_engine.h"
 
-namespace accsi {
+namespace accsify {
 
 struct CatalogEntry {
     const char* name;
@@ -119,6 +119,8 @@ static const CatalogEntry g_model_catalog[] = {
 
 static const size_t g_model_catalog_size = sizeof(g_model_catalog) / sizeof(g_model_catalog[0]);
 
-} // namespace accsi
+} // namespace accsify
 
-#endif /* ACCSI_MODEL_CATALOG_DATA_H */
+namespace accsi = accsify;
+
+#endif /* ACCSIFY_MODEL_CATALOG_DATA_H */

@@ -24,11 +24,12 @@ static void print_banner() {
 static void print_usage() {
     print_banner();
     std::cout << "Usage:\n";
-    std::cout << "  tesseract_cli ocr <image_path> [options]\n";
-    std::cout << "      -l, --lang <lang>       Language code (default: eng, or ara, fra, etc.)\n";
-    std::cout << "      -o, --output <file>     Write recognized text to file\n";
+    std::cout << "  tesseract_cli ocr <image1> [image2 ...] [options]\n";
+    std::cout << "      -l, --lang <lang>       Language code (e.g. eng, ara, ara+eng, fra)\n";
+    std::cout << "      --flavor <fast|best>    Model flavor: fast (compact) or best (high accuracy)\n";
+    std::cout << "      -o, --output <file>     Write recognized text/JSON to file\n";
+    std::cout << "      --format <fmt>          Output format: txt, json, hocr, tsv, box, unlv (default: txt)\n";
     std::cout << "      --psm <0-13>            Page segmentation mode (default: 3 AUTO)\n";
-    std::cout << "      --format <txt|hocr|tsv|box|unlv> Output format (default: txt)\n";
     std::cout << "      --tessdata <dir>        Custom tessdata directory path\n\n";
     std::cout << "  tesseract_cli layout <image_path> [options]\n";
     std::cout << "      Inspect layout: blocks, words, bounding boxes, writing directions\n\n";
@@ -85,20 +86,15 @@ static int progress_callback(
 }
 
 int handle_ocr(int argc, char* argv[]) {
-    if (argc < 3) {
-        std::cerr << "[ERROR] Missing image path for OCR command.\n";
-        print_usage();
-        return 1;
-    }
-
-    std::string image_path = argv[2];
+    std::vector<std::string> image_paths;
     std::string lang = "eng";
     std::string output_file = "";
     std::string format = "txt";
     std::string custom_tessdata = "";
+    std::string flavor_str = "fast";
     int psm = 3;
 
-    for (int i = 3; i < argc; ++i) {
+    for (int i = 2; i < argc; ++i) {
         std::string arg = argv[i];
         if ((arg == "-l" || arg == "--lang") && i + 1 < argc) {
             lang = argv[++i];
@@ -110,20 +106,46 @@ int handle_ocr(int argc, char* argv[]) {
             psm = std::stoi(argv[++i]);
         } else if ((arg == "--tessdata") && i + 1 < argc) {
             custom_tessdata = argv[++i];
+        } else if ((arg == "--flavor" || arg == "--type") && i + 1 < argc) {
+            flavor_str = argv[++i];
+        } else if (arg.rfind("-", 0) != 0) {
+            image_paths.push_back(arg);
         }
+    }
+
+    if (image_paths.empty()) {
+        std::cerr << "[ERROR] Missing input image path(s) for OCR command.\n";
+        print_usage();
+        return 1;
     }
 
     if (!custom_tessdata.empty()) {
         tess_model_set_path(custom_tessdata.c_str());
     }
 
-    // Check if model is installed, if not, auto-download!
-    if (!tess_model_is_installed(lang.c_str(), TESS_MODEL_TYPE_FAST)) {
-        std::cout << "[INFO] Model '" << lang << "' is not installed. Downloading automatically...\n";
-        int dl_res = tess_model_download(lang.c_str(), TESS_MODEL_TYPE_FAST, progress_callback, nullptr);
-        if (dl_res != 0) {
-            std::cerr << "[ERROR] Failed to download model '" << lang << "'.\n";
-            return 1;
+    int model_flavor = (flavor_str == "best") ? TESS_MODEL_TYPE_BEST :
+                       ((flavor_str == "standard") ? TESS_MODEL_TYPE_STANDARD :
+                       ((flavor_str == "script") ? TESS_MODEL_TYPE_SCRIPT : TESS_MODEL_TYPE_FAST));
+    tess_model_set_flavor(model_flavor);
+
+    // Split languages by '+' and verify each one is installed (e.g. "ara+eng")
+    std::vector<std::string> sub_langs;
+    {
+        std::stringstream ss(lang);
+        std::string token;
+        while (std::getline(ss, token, '+')) {
+            if (!token.empty()) sub_langs.push_back(token);
+        }
+    }
+
+    for (const auto& sl : sub_langs) {
+        if (!tess_model_is_installed(sl.c_str(), model_flavor)) {
+            std::cout << "[INFO] Model '" << sl << "' (" << flavor_str << ") is not installed. Downloading automatically...\n";
+            int dl_res = tess_model_download(sl.c_str(), model_flavor, progress_callback, nullptr);
+            if (dl_res != 0) {
+                std::cerr << "[ERROR] Failed to download model '" << sl << "'.\n";
+                return 1;
+            }
         }
     }
 
@@ -145,45 +167,74 @@ int handle_ocr(int argc, char* argv[]) {
 
     tess_set_page_seg_mode(eng, psm);
 
-    if (tess_set_image_file(eng, image_path.c_str()) != 0) {
-        std::cerr << "[ERROR] Failed to load image: " << image_path << "\n";
-        tess_destroy(eng);
-        return 1;
+    std::ostringstream combined_output;
+    bool is_batch = (image_paths.size() > 1);
+
+    if (format == "json" && is_batch) {
+        combined_output << "[\n";
     }
 
-    std::cout << "[*] Running OCR on: " << image_path << " (Language: " << lang << ", PSM: " << psm << ")...\n";
-    tess_recognize(eng);
+    for (size_t idx = 0; idx < image_paths.size(); ++idx) {
+        const std::string& img_path = image_paths[idx];
+        if (tess_set_image_file(eng, img_path.c_str()) != 0) {
+            std::cerr << "[ERROR] Failed to load image: " << img_path << "\n";
+            continue;
+        }
 
-    char* text_ptr = nullptr;
-    if (format == "hocr") {
-        text_ptr = tess_get_hocr_text(eng, 0);
-    } else if (format == "tsv") {
-        text_ptr = tess_get_tsv_text(eng, 0);
-    } else if (format == "box") {
-        text_ptr = tess_get_box_text(eng, 0);
-    } else if (format == "unlv") {
-        text_ptr = tess_get_unlv_text(eng);
-    } else {
-        text_ptr = tess_get_utf8_text(eng);
+        std::cout << "[*] Processing (" << (idx + 1) << "/" << image_paths.size() << "): "
+                  << img_path << " (Lang: " << lang << ", Flavor: " << flavor_str << ", PSM: " << psm << ")...\n";
+        tess_recognize(eng);
+
+        char* text_ptr = nullptr;
+        if (format == "json") {
+            text_ptr = tess_get_json_text(eng);
+        } else if (format == "hocr") {
+            text_ptr = tess_get_hocr_text(eng, 0);
+        } else if (format == "tsv") {
+            text_ptr = tess_get_tsv_text(eng, 0);
+        } else if (format == "box") {
+            text_ptr = tess_get_box_text(eng, 0);
+        } else if (format == "unlv") {
+            text_ptr = tess_get_unlv_text(eng);
+        } else {
+            text_ptr = tess_get_utf8_text(eng);
+        }
+
+        std::string page_text = text_ptr ? text_ptr : "";
+        if (text_ptr) tess_free_text(text_ptr);
+
+        int mean_conf = tess_get_mean_confidence(eng);
+        std::cout << "    [+] Mean Confidence: " << mean_conf << "%\n";
+
+        if (format == "json" && is_batch) {
+            if (idx > 0) combined_output << ",\n";
+            // Prepend image path into the JSON block
+            combined_output << "  {\n    \"image\": \"" << img_path << "\",\n    \"result\": " << page_text << "\n  }";
+        } else if (is_batch && format == "txt") {
+            combined_output << "=== Image: " << img_path << " (Confidence: " << mean_conf << "%) ===\n";
+            combined_output << page_text << "\n\n";
+        } else {
+            combined_output << page_text;
+        }
     }
 
-    std::string result_text = text_ptr ? text_ptr : "";
-    if (text_ptr) tess_free_text(text_ptr);
+    if (format == "json" && is_batch) {
+        combined_output << "\n]";
+    }
 
-    int mean_conf = tess_get_mean_confidence(eng);
-    std::cout << "[*] Mean Recognition Confidence: " << mean_conf << "%\n";
+    std::string final_result = combined_output.str();
 
     if (!output_file.empty()) {
         std::ofstream out(output_file);
         if (out.is_open()) {
-            out << result_text;
-            std::cout << "[OK] Recognized text saved to: " << output_file << "\n";
+            out << final_result;
+            std::cout << "[OK] Recognized result successfully saved to: " << output_file << "\n";
         } else {
             std::cerr << "[ERROR] Cannot write to output file: " << output_file << "\n";
         }
     } else {
         std::cout << "\n----------------------- Recognized Output -----------------------\n";
-        std::cout << result_text << "\n";
+        std::cout << final_result << "\n";
         std::cout << "-----------------------------------------------------------------\n";
     }
 
@@ -198,9 +249,17 @@ int handle_layout(int argc, char* argv[]) {
     }
 
     std::string image_path = argv[2];
+    std::string lang = "eng";
+    for (int i = 3; i < argc; ++i) {
+        std::string arg = argv[i];
+        if ((arg == "-l" || arg == "--lang") && i + 1 < argc) {
+            lang = argv[++i];
+        }
+    }
+
     TessEngineHandle eng = tess_create();
-    if (tess_init(eng, nullptr, "eng", TESS_OEM_DEFAULT) != 0) {
-        std::cerr << "[ERROR] Failed to initialize engine for layout analysis.\n";
+    if (tess_init(eng, nullptr, lang.c_str(), TESS_OEM_DEFAULT) != 0) {
+        std::cerr << "[ERROR] Failed to initialize engine for layout analysis with language: " << lang << "\n";
         tess_destroy(eng);
         return 1;
     }

@@ -1,12 +1,12 @@
 /**
  * @file tesseract_engine.h
  * @brief Complete C Application Binary Interface (C ABI) for the monolithic Tesseract Engine DLL.
- * @company accsi
- * @copyright Copyright (C) 2026 accsi. All rights reserved.
+ * @company accsify
+ * @copyright Copyright (C) 2026 accsify. All rights reserved.
  */
 
-#ifndef ACCSI_TESSERACT_ENGINE_H
-#define ACCSI_TESSERACT_ENGINE_H
+#ifndef ACCSIFY_TESSERACT_ENGINE_H
+#define ACCSIFY_TESSERACT_ENGINE_H
 
 #include <stdint.h>
 #include <stddef.h>
@@ -291,6 +291,12 @@ TESS_API char* TESS_CALL tess_get_box_text(TessEngineHandle handle, int page_num
 TESS_API char* TESS_CALL tess_get_unlv_text(TessEngineHandle handle);
 
 /**
+ * @brief Get recognized document structure as a JSON formatted string. Must be freed with tess_free_text().
+ * Contains full layout hierarchy: text, mean confidence, blocks, lines, words with coordinates, writing directions.
+ */
+TESS_API char* TESS_CALL tess_get_json_text(TessEngineHandle handle);
+
+/**
  * @brief Get mean confidence of the recognized text (0 to 100).
  */
 TESS_API int TESS_CALL tess_get_mean_confidence(TessEngineHandle handle);
@@ -414,6 +420,22 @@ TESS_API int TESS_CALL tess_model_get_path(char* buffer, int max_len);
 TESS_API int TESS_CALL tess_model_get_default_path(char* buffer, int max_len);
 
 /**
+ * @brief Set the active model flavor (TESS_MODEL_TYPE_FAST, TESS_MODEL_TYPE_BEST, etc.).
+ * When set, models are saved into and searched inside corresponding subdirectories (e.g. ./tessdata/best/).
+ */
+TESS_API void TESS_CALL tess_model_set_flavor(int model_type);
+
+/**
+ * @brief Get the active model flavor (TessModelType).
+ */
+TESS_API int TESS_CALL tess_model_get_flavor(void);
+
+/**
+ * @brief Get the directory path for a specific flavor (e.g. ./tessdata/best or ./tessdata/fast).
+ */
+TESS_API int TESS_CALL tess_model_get_flavor_path(int model_type, char* buffer, int max_len);
+
+/**
  * @brief Check if a model is installed in the active tessdata path.
  * @param model_name Name of the model (e.g. "eng", "ara", "script/Arabic").
  * @param model_type TessModelType.
@@ -490,4 +512,4 @@ TESS_API int TESS_CALL tess_model_get_installed_item(int index, char* out_name, 
 }
 #endif
 
-#endif /* ACCSI_TESSERACT_ENGINE_H */
+#endif /* ACCSIFY_TESSERACT_ENGINE_H */

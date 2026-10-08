@@ -162,6 +162,9 @@ class NativeLibrary:
         d.tess_get_unlv_text.restype = c_void_p
         d.tess_get_unlv_text.argtypes = [c_void_p]
 
+        d.tess_get_json_text.restype = c_void_p
+        d.tess_get_json_text.argtypes = [c_void_p]
+
         d.tess_get_mean_confidence.restype = c_int
         d.tess_get_mean_confidence.argtypes = [c_void_p]
 
@@ -216,6 +219,15 @@ class NativeLibrary:
 
         d.tess_model_get_default_path.restype = c_int
         d.tess_model_get_default_path.argtypes = [c_char_p, c_int]
+
+        d.tess_model_set_flavor.restype = None
+        d.tess_model_set_flavor.argtypes = [c_int]
+
+        d.tess_model_get_flavor.restype = c_int
+        d.tess_model_get_flavor.argtypes = []
+
+        d.tess_model_get_flavor_path.restype = c_int
+        d.tess_model_get_flavor_path.argtypes = [c_int, c_char_p, c_int]
 
         d.tess_model_is_installed.restype = c_int
         d.tess_model_is_installed.argtypes = [c_char_p, c_int]

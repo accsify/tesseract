@@ -6,13 +6,15 @@ Copyright (C) 2026 accsify. All rights reserved.
 """
 
 import os
+import json
 import ctypes
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Union, List
+from typing import Optional, Union, List, Dict, Any
 
 from .core import NativeLibrary
 from .types import (
-    PageSegMode, OcrEngineMode, PageIteratorLevel, BoundingBox
+    PageSegMode, OcrEngineMode, PageIteratorLevel, BoundingBox, ModelType
 )
 from .layout import LayoutElement, PageLayout
 from .osd import OrientationScriptResult
@@ -23,25 +25,62 @@ from .exceptions import (
 )
 
 
+@dataclass
+class BatchOcrResult:
+    """Structured result for a single image in batch recognition."""
+    image_path: Optional[str]
+    text: str
+    mean_confidence: int
+    psm: PageSegMode
+    words_count: int
+    structured_data: Dict[str, Any]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "image": self.image_path,
+            "text": self.text,
+            "mean_confidence": self.mean_confidence,
+            "psm": self.psm.name,
+            "words_count": self.words_count,
+            "structured_data": self.structured_data,
+        }
+
+    def to_json(self, indent: int = 2) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=indent)
+
+
 class TesseractEngine:
     """
     Main Accsify Tesseract OCR Engine instance.
     
     Provides thread-safe initialization, image loading, full OCR recognition,
-    layout analysis, script detection, and formatted document exports.
+    layout analysis, script detection, multi-image batch processing, and formatted exports.
     """
 
     def __init__(
         self,
         datapath: Optional[str] = None,
         language: str = "eng",
+        flavor: Optional[ModelType] = None,
         oem: OcrEngineMode = OcrEngineMode.DEFAULT,
+        auto_download: bool = False,
         custom_dll_path: Optional[str] = None
     ):
         self._lib = NativeLibrary.get(custom_dll_path)
         self._handle = self._lib.dll.tess_create()
         if not self._handle:
             raise MemoryError("Failed to allocate Tesseract engine handle.")
+
+        if flavor is not None:
+            ModelManager.set_flavor(flavor)
+        active_flavor = flavor or ModelManager.get_flavor()
+
+        # Handle multi-language parsing & auto-download if requested (e.g. "ara+eng")
+        if auto_download:
+            for sub_lang in language.split("+"):
+                sub_lang = sub_lang.strip()
+                if sub_lang and not ModelManager.is_installed(sub_lang, active_flavor):
+                    ModelManager.download(sub_lang, active_flavor)
 
         dpath = datapath.encode("utf-8") if datapath else None
         res = self._lib.dll.tess_init(self._handle, dpath, language.encode("utf-8"), int(oem))
@@ -116,7 +155,7 @@ class TesseractEngine:
         if self._handle:
             self._lib.dll.tess_set_source_resolution(self._handle, ppi)
 
-    def set_image(self, image: Union[str, Path, bytes, bytearray, any]) -> None:
+    def set_image(self, image: Union[str, Path, bytes, bytearray, Any]) -> None:
         """
         Load an image into the engine.
         
@@ -187,6 +226,29 @@ class TesseractEngine:
             return ctypes.string_at(ptr).decode("utf-8", errors="replace")
         finally:
             self._lib.dll.tess_free_text(ptr)
+
+    def get_json(self) -> str:
+        """
+        Get full structured document analysis directly from native engine as JSON string.
+        Includes full text, mean confidence, psm, and word elements with bounding boxes and writing directions.
+        """
+        if not self._handle:
+            return "{}"
+        ptr = self._lib.dll.tess_get_json_text(self._handle)
+        if not ptr:
+            return "{}"
+        try:
+            return ctypes.string_at(ptr).decode("utf-8", errors="replace")
+        finally:
+            self._lib.dll.tess_free_text(ptr)
+
+    def get_structured_dict(self) -> Dict[str, Any]:
+        """Get full structured document analysis parsed as a native Python dictionary."""
+        raw_json = self.get_json()
+        try:
+            return json.loads(raw_json)
+        except Exception:
+            return {"text": self.get_text(), "mean_confidence": self.get_mean_confidence(), "words": []}
 
     def get_hocr(self, page_num: int = 0) -> str:
         """Get recognized text formatted as HOCR (HTML with bounding boxes)."""
@@ -318,3 +380,30 @@ class TesseractEngine:
             it.close()
 
         return PageLayout(elements=elements)
+
+    def recognize_batch(
+        self,
+        images: List[Union[str, Path, bytes, bytearray, Any]]
+    ) -> List[BatchOcrResult]:
+        """
+        Process multiple images sequentially with high performance and return structured results.
+        """
+        results: List[BatchOcrResult] = []
+        psm = self.get_page_seg_mode()
+
+        for img in images:
+            img_label = str(img) if isinstance(img, (str, Path)) else "<memory_buffer>"
+            self.set_image(img)
+            structured = self.get_structured_dict()
+            words_list = structured.get("words", [])
+
+            results.append(BatchOcrResult(
+                image_path=img_label,
+                text=structured.get("text", ""),
+                mean_confidence=structured.get("mean_confidence", 0),
+                psm=psm,
+                words_count=len(words_list),
+                structured_data=structured
+            ))
+
+        return results

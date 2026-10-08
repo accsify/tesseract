@@ -5,9 +5,10 @@ Company: accsify
 Copyright (C) 2026 accsify. All rights reserved.
 """
 
+import json
 import ctypes
 from dataclasses import dataclass
-from typing import List, Optional, Callable
+from typing import List, Optional, Callable, Dict, Any
 from pathlib import Path
 
 from .types import ModelType
@@ -28,6 +29,20 @@ class ModelInfo:
     @property
     def file_size_mb(self) -> float:
         return self.file_size / (1024.0 * 1024.0)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "display_name": self.display_name,
+            "model_type": self.model_type.name,
+            "file_size": self.file_size,
+            "file_size_mb": round(self.file_size_mb, 2),
+            "download_url": self.download_url,
+            "is_installed": self.is_installed,
+        }
+
+    def to_json(self, indent: int = 2) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=indent)
 
     def __repr__(self) -> str:
         status = "Installed" if self.is_installed else "Not Installed"
@@ -64,8 +79,31 @@ class ModelManager:
         return buf.value.decode("utf-8")
 
     @classmethod
+    def set_flavor(cls, flavor: ModelType) -> None:
+        """
+        Set active model flavor (ModelType.FAST, ModelType.BEST, etc.).
+        Models are stored into and loaded from dedicated subdirectories (e.g. ./tessdata/best/).
+        """
+        lib = NativeLibrary.get()
+        lib.dll.tess_model_set_flavor(int(flavor))
+
+    @classmethod
+    def get_flavor(cls) -> ModelType:
+        """Get current active model flavor."""
+        lib = NativeLibrary.get()
+        return ModelType(lib.dll.tess_model_get_flavor())
+
+    @classmethod
+    def get_flavor_path(cls, flavor: ModelType) -> str:
+        """Get folder path for a specific model flavor."""
+        lib = NativeLibrary.get()
+        buf = ctypes.create_string_buffer(512)
+        lib.dll.tess_model_get_flavor_path(int(flavor), buf, 512)
+        return buf.value.decode("utf-8")
+
+    @classmethod
     def is_installed(cls, model_name: str, model_type: ModelType = ModelType.FAST) -> bool:
-        """Check if a model exists in the active tessdata folder."""
+        """Check if a model exists in the active tessdata folder or flavor subfolder."""
         lib = NativeLibrary.get()
         return lib.dll.tess_model_is_installed(model_name.encode("utf-8"), int(model_type)) != 0
 
@@ -141,4 +179,16 @@ class ModelManager:
 
         if res != 0:
             raise ModelDownloadError(f"Failed to download model '{model_name}' (error code: {res}).")
+        return True
+
+    @classmethod
+    def download_many(
+        cls,
+        model_names: List[str],
+        model_type: ModelType = ModelType.FAST,
+        progress_callback: Optional[Callable[[str, int, int, int, float, str], bool]] = None
+    ) -> bool:
+        """Download multiple models sequentially."""
+        for name in model_names:
+            cls.download(name, model_type=model_type, progress_callback=progress_callback)
         return True

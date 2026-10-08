@@ -1,8 +1,8 @@
 /**
  * @file downloader_winhttp.cpp
  * @brief Native Windows WinHTTP streaming downloader with live progress and cancellation.
- * @company accsi
- * @copyright Copyright (C) 2026 accsi. All rights reserved.
+ * @company accsify
+ * @copyright Copyright (C) 2026 accsify. All rights reserved.
  */
 
 #include "tesseract_engine.h"
@@ -18,7 +18,7 @@
 
 #pragma comment(lib, "winhttp.lib")
 
-namespace accsi {
+namespace accsify {
 
 struct DownloadTask {
     std::atomic<bool> cancelled{false};
@@ -273,4 +273,6 @@ int perform_download(
     return -1;
 }
 
-} // namespace accsi
+} // namespace accsify
+
+namespace accsi = accsify;
