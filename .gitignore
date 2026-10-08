@@ -27,5 +27,9 @@ __pycache__/
 python/dist/
 python/build/
 
+# Release artifacts and archives
+release/
+
 # Ignore test images if temporary
 test_canvas.bmp
+
