@@ -47,25 +47,26 @@ if exist "%VSWHERE_PATH%" (
     )
 )
 
+if not "%VCVARS_BAT%"=="" goto VS_FOUND
+
 :: Fallback standard directories if vswhere did not resolve
-if "%VCVARS_BAT%"=="" (
-    for %%p in (
-        "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvarsall.bat"
-        "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat"
-        "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat"
-        "C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvarsall.bat"
-        "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvarsall.bat"
-        "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvarsall.bat"
-        "C:\Program Files (x86)\Microsoft Visual Studio\2019\Professional\VC\Auxiliary\Build\vcvarsall.bat"
-        "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvarsall.bat"
-    ) do (
-        if "%VCVARS_BAT%"=="" if exist %%p (
-            set "VCVARS_BAT=%%~p"
-            echo [OK] Found Visual Studio at: %%~p
-        )
+for %%p in (
+    "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvarsall.bat"
+    "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat"
+    "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat"
+    "C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvarsall.bat"
+    "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvarsall.bat"
+    "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvarsall.bat"
+    "C:\Program Files (x86)\Microsoft Visual Studio\2019\Professional\VC\Auxiliary\Build\vcvarsall.bat"
+    "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvarsall.bat"
+) do (
+    if "%VCVARS_BAT%"=="" if exist %%p (
+        set "VCVARS_BAT=%%~p"
+        echo [OK] Found Visual Studio at: %%~p
     )
 )
 
+:VS_FOUND
 if "%VCVARS_BAT%"=="" (
     echo [ERROR] Could not automatically detect Visual Studio with C++ tools!
     echo         Please ensure Visual Studio 2017/2019/2022 or newer is installed.
@@ -87,23 +88,23 @@ set "NEED_UPDATE_SOURCES=0"
 if not exist "%PROJECT_ROOT%deps\tesseract\CMakeLists.txt" set "NEED_UPDATE_SOURCES=1"
 if not exist "%PROJECT_ROOT%deps\leptonica\CMakeLists.txt" set "NEED_UPDATE_SOURCES=1"
 
-if "%NEED_UPDATE_SOURCES%"=="1" (
-    echo.
-    echo [*] Upstream dependencies not found in deps/ (tesseract and/or leptonica).
-    echo [*] Automatically launching update_sources.cmd to clone upstream sources...
-    echo.
-    if exist "%PROJECT_ROOT%update_sources.cmd" (
-        call "%PROJECT_ROOT%update_sources.cmd"
-        if !ERRORLEVEL! neq 0 (
-            echo [ERROR] Failed to fetch dependencies via update_sources.cmd!
-            exit /b 1
-        )
-        echo [OK] Upstream dependencies retrieved successfully. Resuming build...
-    ) else (
-        echo [ERROR] update_sources.cmd not found at %PROJECT_ROOT%update_sources.cmd!
-        exit /b 1
-    )
+if not "%NEED_UPDATE_SOURCES%"=="1" goto RESUME_BUILD
+
+echo.
+echo [*] Upstream dependencies missing in deps - fetching sources...
+if not exist "%PROJECT_ROOT%update_sources.cmd" (
+    echo [ERROR] update_sources.cmd not found!
+    exit /b 1
 )
+
+call "%PROJECT_ROOT%update_sources.cmd"
+if %ERRORLEVEL% neq 0 (
+    echo [ERROR] Failed to fetch dependencies via update_sources.cmd!
+    exit /b 1
+)
+echo [OK] Upstream dependencies retrieved successfully. Resuming build...
+
+:RESUME_BUILD
 
 :: ---------------------------------------------------------------------
 :: 2. Build x64 Target
