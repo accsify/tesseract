@@ -12,19 +12,30 @@ import sys
 import ctypes
 from ctypes import wintypes
 from pathlib import Path
-from typing import Optional, Union, Tuple
-from PIL import Image
+from typing import Optional, Union, Tuple, Any
+
+try:
+    from PIL import Image
+    _HAVE_PIL = True
+except ImportError:
+    Image = None  # type: ignore
+    _HAVE_PIL = False
 
 
 def _render_with_windows_gdi(
     width: int,
     height: int,
     elements: list
-) -> Image.Image:
+) -> Any:
     """
     Render text elements onto a high-contrast bitmap using native Windows GDI
     with full Uniscribe support for bidirectional (BiDi) Arabic shaping.
     """
+    if not _HAVE_PIL:
+        raise ImportError(
+            "Pillow is required for synthetic test image generation. "
+            "Please install it with: pip install pillow"
+        )
     user32 = ctypes.windll.user32
     gdi32 = ctypes.windll.gdi32
 
@@ -139,7 +150,7 @@ def generate_sample_document(
     output_path: Optional[Union[str, Path]] = None,
     width: int = 1200,
     height: int = 750
-) -> Image.Image:
+) -> Any:
     """
     Generate a bilingual (Arabic + English) document test image.
     Contains both LTR and RTL sections, metadata numbers, and headings.
@@ -240,7 +251,7 @@ def generate_sample_receipt(
     output_path: Optional[Union[str, Path]] = None,
     width: int = 850,
     height: int = 1000
-) -> Image.Image:
+) -> Any:
     """
     Generate a bilingual commercial receipt test image with tabular columns.
     """

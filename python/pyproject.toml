@@ -13,6 +13,9 @@ license-files = ["LICENSE"]
 authors = [
     { name = "accsify", email = "contact@accsify.com" }
 ]
+dependencies = [
+    "pillow>=9.0.0",
+]
 keywords = ["ocr", "tesseract", "text-recognition", "computer-vision", "accsify", "layout-analysis"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
