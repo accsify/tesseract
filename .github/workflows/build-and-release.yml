@@ -101,7 +101,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish to PyPI
-        if: inputs.publish_pypi && secrets.PYPI_API_TOKEN != ''
+        if: inputs.publish_pypi
         shell: cmd
         env:
           TWINE_USERNAME: __token__
