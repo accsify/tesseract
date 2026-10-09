@@ -87,7 +87,7 @@ jobs:
         run: |
           python -c "import sys; sys.path.insert(0, 'python'); import accsify_tesseract; print('Engine Version:', accsify_tesseract.TesseractEngine.version()); print('Loaded DLL:', accsify_tesseract.get_native_dll_path()); print('Loaded CLI:', accsify_tesseract.get_native_cli_path())"
 
-      - name: Package GitHub Release Bundles (ZIP and SHA256)
+      - name: Package GitHub Release Bundles (ZIP with Docs, Python Wheels, and SHA256)
         shell: cmd
         run: |
           call package_release.cmd
