@@ -51,6 +51,11 @@ jobs:
           cmake --version
           ninja --version
 
+      - name: Fetch Upstream Dependencies (Tesseract & Leptonica)
+        shell: cmd
+        run: |
+          call update_sources.cmd
+
       - name: Build Native Standalone Engine (/MT x64 and x86)
         shell: cmd
         run: |
@@ -96,10 +101,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish to PyPI
-        if: inputs.publish_pypi && env.HAVE_PYPI_TOKEN == 'true'
+        if: inputs.publish_pypi && secrets.PYPI_API_TOKEN != ''
         shell: cmd
         env:
-          HAVE_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN != '' }}
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
         run: |

@@ -16,11 +16,7 @@ if "%LEPTONICA_VERSION%"=="" (
 )
 
 set "ROOT_DIR=%~dp0"
-if exist "%ROOT_DIR%..\deps" (
-    set "DEPS_DIR=%ROOT_DIR%..\deps"
-) else (
-    set "DEPS_DIR=%ROOT_DIR%deps"
-)
+set "DEPS_DIR=%ROOT_DIR%deps"
 
 if not exist "%DEPS_DIR%" (
     mkdir "%DEPS_DIR%"
