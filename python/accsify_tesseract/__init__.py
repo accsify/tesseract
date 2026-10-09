@@ -8,7 +8,20 @@ Modern, thread-safe, object-oriented interface for the monolithic
 standalone Tesseract OCR engine with WinHTTP model downloader.
 """
 
-__version__ = "5.5.0.1"
+from pathlib import Path
+
+
+def _resolve_version() -> str:
+    pkg_dir = Path(__file__).resolve().parent
+    for cand in (pkg_dir / "VERSION", pkg_dir.parent / "VERSION", pkg_dir.parent.parent / "VERSION"):
+        if cand.is_file():
+            v = cand.read_text(encoding="utf-8").strip()
+            if v:
+                return v
+    return "1.0.5.1"
+
+
+__version__ = _resolve_version()
 __company__ = "accsify"
 
 from .types import (
@@ -63,6 +76,11 @@ from .core import (
 from .engine import (
     TesseractEngine,
     BatchOcrResult,
+)
+
+from .sample_generator import (
+    generate_sample_document,
+    generate_sample_receipt,
 )
 
 
@@ -159,4 +177,6 @@ __all__ = [
     "image_to_string",
     "image_to_json",
     "image_to_dict",
+    "generate_sample_document",
+    "generate_sample_receipt",
 ]

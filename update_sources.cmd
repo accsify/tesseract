@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 echo =====================================================================
-echo  Accsi Tesseract Source Updater / Downloader
+echo  Accsify Tesseract Source Updater / Downloader
 echo =====================================================================
 
 set "TESSERACT_VERSION=%~1"
@@ -76,8 +76,13 @@ if %ERRORLEVEL% neq 0 (
     echo [ERROR] Failed to fetch Tesseract %TESSERACT_VERSION%!
     exit /b 1
 )
-echo [OK] Tesseract is up to date.
-echo.
+:: ---------------------------------------------------------------------
+:: 3. Clean stale build cache
+:: ---------------------------------------------------------------------
+if exist "%ROOT_DIR%build" (
+    echo [*] Cleaning stale build caches in %ROOT_DIR%build...
+    rd /s /q "%ROOT_DIR%build"
+)
 
 echo =====================================================================
 echo  Source update completed successfully!

@@ -91,21 +91,36 @@ for /d %%d in (*.egg-info) do rd /s /q "%%d"
 echo [OK] Build workspaces clean.
 
 :: ---------------------------------------------------------------------
-:: 4. Build Real PyPI Distributions (.tar.gz and .whl)
+:: 4. Build Real PyPI Distributions (.tar.gz and Arch-Specific .whl)
 :: ---------------------------------------------------------------------
 echo.
-echo [*] Building PEP 517 / PEP 621 sdist and wheel distributions...
-python -m build --no-isolation --sdist --wheel
+echo [*] Building PEP 517 sdist distribution (with unified tests)...
+python setup.py sdist
 if %ERRORLEVEL% neq 0 (
-    echo [ERROR] Package build failed!
+    echo [ERROR] Source distribution build failed!
     exit /b 1
 )
 
-:: Also generate platform-tagged wheels (win_amd64 and win32) for explicit platform targeting
 echo.
-echo [*] Building platform-tagged wheels for win_amd64 and win32...
-python setup.py bdist_wheel --plat-name win_amd64 >nul
-python setup.py bdist_wheel --plat-name win32 >nul
+echo [*] Building platform wheel for win_amd64 (containing ONLY x64 native binaries)...
+python setup.py bdist_wheel --plat-name win_amd64
+if %ERRORLEVEL% neq 0 (
+    echo [ERROR] win_amd64 wheel build failed!
+    exit /b 1
+)
+
+echo.
+echo [*] Building platform wheel for win32 (containing ONLY x86 native binaries)...
+python setup.py bdist_wheel --plat-name win32
+if %ERRORLEVEL% neq 0 (
+    echo [ERROR] win32 wheel build failed!
+    exit /b 1
+)
+
+:: Clean ephemeral build workspace
+if exist "build" rd /s /q "build"
+for /d %%d in (*.egg-info) do rd /s /q "%%d"
+if exist ".pytest_cache" rd /s /q ".pytest_cache"
 
 :: ---------------------------------------------------------------------
 :: 5. Verify Package Integrity with Twine
@@ -123,11 +138,11 @@ if %ERRORLEVEL% neq 0 (
 echo [OK] All distribution packages passed Twine strict validation!
 
 :: ---------------------------------------------------------------------
-:: 6. Verify Embedded Native Contents
+:: 6. Verify Architecture Isolation in Distribution Wheels
 :: ---------------------------------------------------------------------
 echo.
-echo [*] Verifying embedded files in distribution wheel:
-python -c "import zipfile, glob; wheels = glob.glob('dist/*.whl'); z = zipfile.ZipFile(wheels[0]); [print('   ->', name) for name in z.namelist() if name.startswith('accsify_tesseract/lib/')]"
+echo [*] Verifying architecture isolation in distribution wheels:
+python -c "import zipfile, glob; wheels = sorted(glob.glob('dist/*.whl')); [print('\n--- ' + w + ' ---') or [print('   ->', n) for n in zipfile.ZipFile(w).namelist() if 'lib/' in n] for w in wheels]"
 
 :: ---------------------------------------------------------------------
 :: 7. Summary and Upload Instructions

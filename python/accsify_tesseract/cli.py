@@ -276,6 +276,13 @@ def main():
     # Version
     subparsers.add_parser("version", help="Show engine version")
 
+    # Demo
+    subparsers.add_parser("demo", help="Run the built-in bilingual Arabic & English OCR demonstration")
+
+    # Init-examples / Scaffolding
+    p_init = subparsers.add_parser("init-examples", help="Copy bundled tutorial scripts and sample images to local folder")
+    p_init.add_argument("-d", "--dest", default=".", help="Target destination directory (default: current directory)")
+
     args = parser.parse_args()
     if not args.command:
         print_banner()
@@ -284,6 +291,16 @@ def main():
 
     if args.command == "version":
         print_banner()
+        return 0
+    elif args.command == "demo":
+        from .examples import run_demo
+        return run_demo()
+    elif args.command == "init-examples":
+        from .examples import copy_examples
+        copied = copy_examples(args.dest)
+        print(f"[OK] Successfully copied {len(copied)} tutorial files to: {Path(args.dest).resolve()}")
+        for f in copied:
+            print(f"  -> {f.name}")
         return 0
     elif args.command == "ocr":
         return cmd_ocr(args)

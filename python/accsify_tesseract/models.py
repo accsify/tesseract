@@ -157,8 +157,6 @@ class ModelManager:
                               Return False to abort/cancel download.
         """
         lib = NativeLibrary.get()
-        c_cb = None
-
         if progress_callback:
             def _thunk(m_name, m_type, downloaded, total, pct, msg, u_data):
                 cont = progress_callback(
@@ -169,6 +167,8 @@ class ModelManager:
                 return 0 if cont else 1
 
             c_cb = PROGRESS_CALLBACK_TYPE(_thunk)
+        else:
+            c_cb = PROGRESS_CALLBACK_TYPE()
 
         res = lib.dll.tess_model_download(
             model_name.encode("utf-8"),

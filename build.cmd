@@ -103,8 +103,14 @@ if not exist "%BUILD_DIR%\x64" mkdir "%BUILD_DIR%\x64"
 
 cmake -B "%BUILD_DIR%\x64" -G "Ninja" -DCMAKE_BUILD_TYPE=Release "%PROJECT_ROOT%"
 if %ERRORLEVEL% neq 0 (
-    echo [ERROR] CMake configuration failed for x64!
-    exit /b 1
+    echo [WARNING] CMake configuration failed. Retrying with a clean cache...
+    if exist "%BUILD_DIR%\x64" rd /s /q "%BUILD_DIR%\x64"
+    mkdir "%BUILD_DIR%\x64"
+    cmake -B "%BUILD_DIR%\x64" -G "Ninja" -DCMAKE_BUILD_TYPE=Release "%PROJECT_ROOT%"
+    if !ERRORLEVEL! neq 0 (
+        echo [ERROR] CMake configuration failed for x64!
+        exit /b 1
+    )
 )
 
 cmake --build "%BUILD_DIR%\x64" --config Release
@@ -144,8 +150,14 @@ if not exist "%BUILD_DIR%\x86" mkdir "%BUILD_DIR%\x86"
 
 cmake -B "%BUILD_DIR%\x86" -G "Ninja" -DCMAKE_BUILD_TYPE=Release "%PROJECT_ROOT%"
 if %ERRORLEVEL% neq 0 (
-    echo [ERROR] CMake configuration failed for x86!
-    exit /b 1
+    echo [WARNING] CMake configuration failed. Retrying with a clean cache...
+    if exist "%BUILD_DIR%\x86" rd /s /q "%BUILD_DIR%\x86"
+    mkdir "%BUILD_DIR%\x86"
+    cmake -B "%BUILD_DIR%\x86" -G "Ninja" -DCMAKE_BUILD_TYPE=Release "%PROJECT_ROOT%"
+    if !ERRORLEVEL! neq 0 (
+        echo [ERROR] CMake configuration failed for x86!
+        exit /b 1
+    )
 )
 
 cmake --build "%BUILD_DIR%\x86" --config Release
@@ -177,6 +189,6 @@ echo =====================================================================
 echo  Final Deliverables located in:
 echo   [x64 DLL] %DIST_DIR%\x64\tesseract_engine.dll
 echo   [x86 DLL] %DIST_DIR%\x86\tesseract_engine.dll
-echo   [Headers] %DIST_DIR%\include\include.h
+echo   [Headers] %DIST_DIR%\include\tesseract_engine.h
 echo =====================================================================
 exit /b 0

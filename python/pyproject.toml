@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "accsify-tesseract"
-version = "5.5.0.1"
+version = "1.0.5.1"
 description = "Official Python SDK and CLI for the Accsify Monolithic Tesseract OCR Engine"
 readme = "README.md"
 requires-python = ">=3.8"

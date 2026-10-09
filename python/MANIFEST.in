@@ -4,3 +4,5 @@ include pyproject.toml
 include setup.cfg
 recursive-include accsify_tesseract *.py py.typed
 recursive-include accsify_tesseract/lib *.dll *.exe *.lib
+recursive-include accsify_tesseract/examples *.py *.png *.md
+recursive-include tests *.py

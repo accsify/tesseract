@@ -18,7 +18,17 @@ import subprocess
 from pathlib import Path
 
 
-VERSION = "5.5.0.1"
+def get_release_version() -> str:
+    root = Path(__file__).resolve().parent.parent
+    for cand in (root / "VERSION", root / "python" / "VERSION"):
+        if cand.is_file():
+            v = cand.read_text(encoding="utf-8").strip()
+            if v:
+                return v
+    return "5.5.0.1"
+
+
+VERSION = get_release_version()
 COMPANY = "accsify"
 
 

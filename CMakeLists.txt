@@ -1,7 +1,15 @@
 cmake_minimum_required(VERSION 3.20)
 
+# Read canonical project version from VERSION file
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
+    file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" RAW_VERSION LIMIT_COUNT 1)
+    string(STRIP "${RAW_VERSION}" ACCSIFY_PROJECT_VERSION)
+else()
+    set(ACCSIFY_PROJECT_VERSION "1.0.5.1")
+endif()
+
 project(accsify_tesseract_engine
-    VERSION 5.5.0.1
+    VERSION ${ACCSIFY_PROJECT_VERSION}
     LANGUAGES C CXX
 )
 

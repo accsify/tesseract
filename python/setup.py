@@ -22,10 +22,10 @@ except ImportError:
         _bdist_wheel = None
 
 
-def sync_native_libraries():
+def sync_native_libraries(arch_target: str = "all"):
     """
     Ensure standalone native libraries (DLL, LIB, CLI) are copied from dist/ or bin/
-    into accsify_tesseract/lib/ (and bin/) for x64 and x86 architectures.
+    into accsify_tesseract/lib/ for target architecture ('x64', 'x86', or 'all').
     """
     python_dir = Path(__file__).resolve().parent
     pkg_dir = python_dir / "accsify_tesseract"
@@ -39,7 +39,21 @@ def sync_native_libraries():
         Path.cwd() / "bin",
     ]
 
-    for arch in ("x64", "x86"):
+    all_archs = ("x64", "x86")
+    active_archs = (arch_target,) if arch_target in all_archs else all_archs
+
+    # Remove binaries of non-target architecture from wheel workspace (preserve tessdata!)
+    if arch_target in all_archs:
+        for other in all_archs:
+            if other != arch_target:
+                other_dir = pkg_dir / "lib" / other
+                if other_dir.is_dir():
+                    for fname in ("tesseract_engine.dll", "tesseract_cli.exe", "tesseract_engine.lib"):
+                        bfile = other_dir / fname
+                        if bfile.is_file():
+                            bfile.unlink()
+
+    for arch in active_archs:
         target_lib_dir = pkg_dir / "lib" / arch
         target_lib_dir.mkdir(parents=True, exist_ok=True)
 
@@ -58,33 +72,54 @@ def sync_native_libraries():
                     # Copy if missing or different in size / mtime
                     if not dst_lib_file.exists() or src_file.stat().st_mtime > dst_lib_file.stat().st_mtime or src_file.stat().st_size != dst_lib_file.stat().st_size:
                         shutil.copy2(src_file, dst_lib_file)
-                        print(f"[setup.py] Bundled native binary: {src_file.name} -> {dst_lib_file.relative_to(python_dir)}")
+                        print(f"[setup.py] Bundled native binary ({arch}): {src_file.name} -> {dst_lib_file.relative_to(python_dir)}")
 
 
 # Synchronize binaries immediately upon loading setup.py
-sync_native_libraries()
+sync_native_libraries("all")
 
 
 class BuildPyCommand(_build_py):
     """Custom build_py command that guarantees native libraries are synchronized and included."""
     def run(self):
-        sync_native_libraries()
         super().run()
-        # Ensure build directory also receives lib folder
+        # Synchronize lib directory strictly matching pkg_dir/lib
         pkg_dir = Path(__file__).resolve().parent / "accsify_tesseract"
         build_pkg = Path(self.build_lib) / "accsify_tesseract"
         src_sub = pkg_dir / "lib"
         dst_sub = build_pkg / "lib"
+        if dst_sub.is_dir():
+            shutil.rmtree(dst_sub, ignore_errors=True)
         if src_sub.is_dir():
             shutil.copytree(src_sub, dst_sub, dirs_exist_ok=True)
-            print(f"[setup.py] Copied native lib tree to build/lib directory.")
+
+
+def sync_tests_for_packaging():
+    """Temporarily mirror unified ../tests into python/tests when building sdist."""
+    python_dir = Path(__file__).resolve().parent
+    repo_tests = python_dir.parent / "tests"
+    target_tests = python_dir / "tests"
+    if repo_tests.is_dir() and repo_tests.resolve() != target_tests.resolve():
+        shutil.copytree(repo_tests, target_tests, dirs_exist_ok=True)
+
+
+def clean_tests_after_packaging():
+    """Clean up ephemeral tests folder after sdist packaging to keep repo pristine."""
+    python_dir = Path(__file__).resolve().parent
+    target_tests = python_dir / "tests"
+    if target_tests.is_dir():
+        shutil.rmtree(target_tests, ignore_errors=True)
 
 
 class SdistCommand(_sdist):
-    """Custom sdist command that guarantees native libraries are packaged into source distribution."""
+    """Custom sdist command that guarantees native libraries and tests are packaged into source distribution."""
     def run(self):
-        sync_native_libraries()
-        super().run()
+        sync_native_libraries("all")
+        sync_tests_for_packaging()
+        try:
+            super().run()
+        finally:
+            clean_tests_after_packaging()
 
 
 cmdclass = {
@@ -94,13 +129,41 @@ cmdclass = {
 
 if _bdist_wheel is not None:
     class BDistWheelCommand(_bdist_wheel):
-        """Custom bdist_wheel command that guarantees native libraries are included in wheel."""
+        """Custom bdist_wheel command that packages ONLY the target architecture's native binaries."""
         def run(self):
-            sync_native_libraries()
-            super().run()
+            plat = getattr(self, "plat_name", "") or ""
+            target_arch = "x64" if ("amd64" in plat or "x86_64" in plat) else ("x86" if ("win32" in plat or "x86" in plat) else "all")
+            sync_native_libraries(arch_target=target_arch)
+
+            # Wipe build directory so stale files from prior architectures are never packaged
+            build_dir = Path(__file__).resolve().parent / "build"
+            if build_dir.is_dir():
+                shutil.rmtree(build_dir, ignore_errors=True)
+
+            try:
+                super().run()
+            finally:
+                # Always restore all architectures for local dev environment
+                sync_native_libraries(arch_target="all")
 
     cmdclass["bdist_wheel"] = BDistWheelCommand
 
+
+# Read version from VERSION file (Single Source of Truth)
+def get_package_version() -> str:
+    for cand in (
+        Path(__file__).resolve().parent / "VERSION",
+        Path(__file__).resolve().parent.parent / "VERSION",
+        Path.cwd() / "VERSION",
+    ):
+        if cand.is_file():
+            v = cand.read_text(encoding="utf-8").strip()
+            if v:
+                return v
+    return "5.5.0.1"
+
+
+pkg_version = get_package_version()
 
 # Read long description from README.md
 readme_path = Path(__file__).resolve().parent / "README.md"
@@ -108,7 +171,7 @@ long_description = readme_path.read_text(encoding="utf-8") if readme_path.is_fil
 
 setup(
     name="accsify-tesseract",
-    version="5.5.0.1",
+    version=pkg_version,
     author="accsify",
     author_email="support@accsify.com",
     description="Official Python SDK and CLI for the Accsify Monolithic Tesseract OCR Engine",
@@ -127,6 +190,9 @@ setup(
             "py.typed",
             "lib/x64/*",
             "lib/x86/*",
+            "examples/*",
+            "examples/*.png",
+            "examples/*.md",
         ],
     },
     entry_points={
