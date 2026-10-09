@@ -1,0 +1,12 @@
+# Accsify Tesseract - Python Package Installation Requirements
+# Company: accsify
+# =============================================================
+
+# Install the local accsify-tesseract package in editable mode
+-e ./python
+
+# Core image processing and preprocessing dependency
+pillow>=9.0.0
+
+# Optional: Uncomment for pandas DataFrame output in compat.image_to_data(output_type=Output.DATAFRAME)
+# pandas>=1.5.0

@@ -1,0 +1,9 @@
+# Accsify Tesseract - Python Core Runtime Requirements
+# Company: accsify
+# ===================================================
+
+# Pillow: Image decoding, DPI extraction, and preprocessing (contrast, sharpening, binarization)
+pillow>=9.0.0
+
+# Optional: Uncomment for pandas DataFrame output in compat.image_to_data(output_type=Output.DATAFRAME)
+# pandas>=1.5.0
