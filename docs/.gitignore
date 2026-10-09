@@ -1,0 +1,6 @@
+# Ignore all files inside this folder
+*
+
+# Do not ignore Markdown files
+!*.md
+!.gitignore

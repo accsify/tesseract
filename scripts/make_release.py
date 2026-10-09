@@ -81,7 +81,7 @@ def main():
     readme_file = root_dir / "README.md"
     if readme_file.is_file():
         docs_files.append((readme_file, "README.md"))
-    cli_readme = root_dir / "docs" / "CLI_README.md"
+    cli_readme = root_dir / "CLI_README.md"
     if cli_readme.is_file():
         docs_files.append((cli_readme, "CLI_README.md"))
     license_file = root_dir / "LICENSE"
@@ -89,6 +89,14 @@ def main():
         license_file = root_dir / "python" / "LICENSE"
     if license_file.is_file():
         docs_files.append((license_file, "LICENSE"))
+
+    # Include all files from docs folder
+    docs_dir = root_dir / "docs"
+    if docs_dir.is_dir():
+        for doc_file in sorted(docs_dir.rglob("*")):
+            if doc_file.is_file():
+                rel_path = doc_file.relative_to(root_dir)
+                docs_files.append((doc_file, str(rel_path).replace("\\", "/")))
 
     # Header files
     header_files = []
@@ -163,7 +171,18 @@ def main():
     created_zips.append(zip_all_path)
 
     # -------------------------------------------------------------------------
-    # Bundle 4: Copy Python Wheels and Sdist into Release Folder
+    # Bundle 4: Standalone Complete Documentation Archive (docs/ folder & manuals)
+    # -------------------------------------------------------------------------
+    zip_docs_name = f"accsify-tesseract-v{VERSION}-docs.zip"
+    zip_docs_path = release_dir / zip_docs_name
+    print(f"[*] Packaging {zip_docs_name}...")
+    with zipfile.ZipFile(zip_docs_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+        for src, arc in docs_files:
+            z.write(src, arcname=arc)
+    created_zips.append(zip_docs_path)
+
+    # -------------------------------------------------------------------------
+    # Bundle 5: Copy Python Wheels and Sdist into Release Folder
     # -------------------------------------------------------------------------
     python_artifacts = []
     if python_dist_dir.is_dir():

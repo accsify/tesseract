@@ -3,8 +3,18 @@
 > **Company:** accsify  
 > **Product Version:** 5.5.0.1  
 > **Underlying Engine:** Tesseract 5.5.0 & Leptonica 1.84.1  
-> **Target Platforms:** Windows x64 (AMD64) & Windows x86 (Win32)  
 > **Runtime Dependency:** **ZERO** (Static C/C++ Runtime `/MT` - No Visual C++ Redistributable required)  
+> **Python Package (PyPI):** `accsify-tesseract`  
+
+[![PyPI version](https://img.shields.io/badge/pypi-v1.0.5.1-blue.svg)](https://pypi.org/project/accsify-tesseract/)
+[![Python Versions](https://img.shields.io/badge/python-3.8%20%7C%203.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue.svg)](https://pypi.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%7C%20x86-green.svg)](https://microsoft.com)
+
+```bash
+# Install the official Python package directly via pip:
+pip install accsify-tesseract
+```
 
 ---
 
@@ -14,7 +24,11 @@
 
 ### Core Distinctions
 * **True Single-File Monolithic DLL (`tesseract_engine.dll`)**: Everything is statically compiled into one DLL. You do not need `msvcp140.dll`, `vcruntime140.dll`, `leptonica.dll`, `libpng16.dll`, `zlib.dll`, or `libcurl.dll`.
+* **Zero 0-DPI Warnings**: Automatic internal Leptonica Pix resolution normalization (defaults to 300 DPI) and Pillow DPI metadata extraction completely eliminates legacy `Warning. Invalid resolution 0 dpi. Using 70 instead.` console spam.
+* **Drop-in `pytesseract` Compatibility**: Provides `accsify_tesseract.compat` allowing legacy applications like `accsisuite` to replace `import pytesseract` with zero code changes.
+* **Automatic OSD Model Downloader**: Detects if `osd.traineddata` is missing and auto-downloads it over HTTPS before running orientation detection, preventing missing model exceptions.
 * **Native Windows WinHTTP Downloader**: Downloads any official Tesseract language model directly from GitHub over HTTPS (TLS 1.2/1.3) with live progress callbacks, cancel tokens, and automatic redirects without third-party network libraries.
+* **Advanced Features & Searchable PDF**: Built-in ROI (Region of Interest) rectangle cropping, character whitelisting/blacklisting, native PDF generation (`tess_generate_searchable_pdf`), and word confidence extraction.
 * **Complete Layout Analysis & Script Orientation**: Exposes full hierarchical layout (Blocks, Paragraphs, TextLines, Words, Symbols), bounding boxes, confidence scores, textline orders, deskew angles, and writing directions (Left-to-Right, Right-to-Left, Top-to-Bottom).
 * **Cross-Language Universal C ABI**: Can be called from C, C++, C#, Python, Rust, Go, Delphi, and any language supporting standard C dynamic loading.
 * **Official Modular Python Package**: Comes with a production-grade, object-oriented Python package (`accsify_tesseract`) with typing, dataclasses, context managers, and custom exceptions.
@@ -233,11 +247,23 @@ tesseract_cli.exe models path C:\MyTessData
 ## 5. Python API Reference (`accsify_tesseract`)
 
 ### 5.1 Installation & Setup
-You can either import the package directly from `python/` or install it:
-
+Install the official package from PyPI:
 ```bash
-cd python
-pip install -e .
+pip install accsify-tesseract
+```
+
+Or install direct Windows wheel packages:
+```bash
+# For 64-bit Windows:
+pip install dist/accsify_tesseract-1.0.5.1-py3-none-win_amd64.whl
+
+# For 32-bit Windows:
+pip install dist/accsify_tesseract-1.0.5.1-py3-none-win32.whl
+```
+
+Or install from local source repository in editable mode:
+```bash
+pip install -e python
 ```
 
 ### 5.2 Basic OCR (Context Manager)
@@ -317,6 +343,69 @@ if not ModelManager.is_installed("ara"):
     ModelManager.download("ara", ModelType.FAST, on_progress)
 ```
 
+### 5.7 Drop-in `pytesseract` Compatibility Layer
+Any existing Python codebase using `pytesseract` can immediately migrate with zero code modifications:
+
+```python
+# Before:
+# import pytesseract
+
+# After (Drop-in):
+from accsify_tesseract import compat as pytesseract
+
+# The rest of your code runs unchanged!
+# tesseract_cmd setting is supported (harmless no-op):
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+# OSD orientation detection (auto-downloads osd.traineddata if missing):
+osd_data = pytesseract.image_to_osd("scanned_page.png", config='--psm 0')
+# returns standard: "Orientation in degrees: 0\nRotate: 0\nScript: Latin..."
+
+# OCR with config flags:
+text = pytesseract.image_to_string("document.png", config='--psm 11')
+
+# Bounding boxes and TSV data tables:
+boxes = pytesseract.image_to_boxes("document.png")
+data_tsv = pytesseract.image_to_data("document.png", output_type=pytesseract.Output.STRING)
+data_dict = pytesseract.image_to_data("document.png", output_type=pytesseract.Output.DICT)
+```
+
+### 5.8 Image Preprocessing Suite & DPI Normalization
+```python
+from accsify_tesseract.preprocessing import enhance_for_ocr, extract_image_dpi
+from PIL import Image
+
+img = Image.open("faded_receipt.png")
+
+# Extract image DPI if present
+dpi = extract_image_dpi(img)
+
+# Enhance image: auto-contrast, unsharp mask sharpening, optional binarization
+clean_img = enhance_for_ocr(img, auto_contrast=True, sharpen=True, binarize=False)
+
+# Or pass enhance=True directly to image_to_string:
+from accsify_tesseract import image_to_string
+text = image_to_string(img, enhance=True)
+```
+
+### 5.9 Searchable PDF & Region of Interest (ROI)
+```python
+from accsify_tesseract import TesseractEngine
+
+with TesseractEngine(language="eng") as tess:
+    # 1. Restrict OCR to a bounding rectangle (ROI)
+    tess.set_image("page.png")
+    tess.set_rectangle(left=100, top=150, width=400, height=80)
+    print("ROI text:", tess.get_text())
+    tess.clear()  # reset ROI
+    
+    # 2. Character whitelisting / blacklisting
+    tess.set_char_whitelist("0123456789.")
+    
+    # 3. Generate Searchable PDF
+    tess.generate_searchable_pdf("input_scan.png", "output_searchable")
+```
+
 ---
 
 ## 6. C/C++ API Reference (`include/accsify_tesseract.h`)
@@ -336,12 +425,19 @@ void tess_destroy(TessEngineHandle handle);
 int tess_init(TessEngineHandle handle, const char* datapath, const char* language, int oem_mode);
 int tess_is_initialized(TessEngineHandle handle);
 
-// Parameters and PSM
+// Parameters, PSM, and DPI
 int tess_set_variable(TessEngineHandle handle, const char* name, const char* value);
 int tess_get_variable(TessEngineHandle handle, const char* name, char* buffer, int max_len);
 void tess_set_page_seg_mode(TessEngineHandle handle, int psm_mode);
 int tess_get_page_seg_mode(TessEngineHandle handle);
 void tess_set_source_resolution(TessEngineHandle handle, int ppi);
+int tess_get_source_resolution(TessEngineHandle handle);
+
+// Region of Interest (ROI) & Filtering
+void tess_set_rectangle(TessEngineHandle handle, int left, int top, int width, int height);
+void tess_clear(TessEngineHandle handle);
+int tess_set_char_whitelist(TessEngineHandle handle, const char* whitelist);
+int tess_set_char_blacklist(TessEngineHandle handle, const char* blacklist);
 ```
 
 ### 6.2 Image Loading
@@ -352,7 +448,7 @@ int tess_set_image_file(TessEngineHandle handle, const char* filepath);
 // Encoded memory buffer
 int tess_set_image_bytes(TessEngineHandle handle, const unsigned char* data, size_t length);
 
-// Raw uncompressed pixels
+// Raw uncompressed pixels (Auto-normalized to 300 DPI - zero 0-DPI warning!)
 int tess_set_image_raw(TessEngineHandle handle, const unsigned char* image_data,
                        int width, int height, int bytes_per_pixel, int bytes_per_line);
 ```
@@ -368,9 +464,17 @@ char* tess_get_hocr_text(TessEngineHandle handle, int page_number);
 char* tess_get_tsv_text(TessEngineHandle handle, int page_number);
 char* tess_get_box_text(TessEngineHandle handle, int page_number);
 char* tess_get_unlv_text(TessEngineHandle handle);
+char* tess_get_osd_text(TessEngineHandle handle, int page_number);
 
 int tess_get_mean_confidence(TessEngineHandle handle);
 void tess_free_text(char* text);
+
+// Word confidences
+int* tess_get_all_word_confidences(TessEngineHandle handle, int* count);
+void tess_free_confidences(int* confidences);
+
+// Searchable PDF Generator
+int tess_generate_searchable_pdf(TessEngineHandle handle, const char* image_path, const char* output_pdf_base);
 ```
 
 ### 6.4 Layout, Direction & Iterators

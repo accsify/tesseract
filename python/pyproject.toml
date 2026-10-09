@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "accsify-tesseract"
-version = "1.0.5.1"
+version = "1.0.6.2"
 description = "Official Python SDK and CLI for the Accsify Monolithic Tesseract OCR Engine"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -14,7 +14,7 @@ authors = [
     { name = "accsify", email = "contact@accsify.com" }
 ]
 dependencies = [
-    "pillow>=9.0.0",
+    "pillow",
 ]
 keywords = ["ocr", "tesseract", "text-recognition", "computer-vision", "accsify", "layout-analysis"]
 classifiers = [

@@ -6,6 +6,7 @@ Copyright (C) 2026 accsify. All rights reserved.
 """
 
 import os
+import re
 import json
 import ctypes
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ from .layout import LayoutElement, PageLayout
 from .osd import OrientationScriptResult
 from .iterator import TesseractIterator
 from .models import ModelManager
+from .preprocessing import extract_image_dpi, enhance_for_ocr
 from .exceptions import (
     EngineInitError, ImageLoadError, RecognitionError
 )
@@ -75,12 +77,18 @@ class TesseractEngine:
             ModelManager.set_flavor(flavor)
         active_flavor = flavor or ModelManager.get_flavor()
 
-        # Handle multi-language parsing & auto-download if requested (e.g. "ara+eng")
-        if auto_download:
-            for sub_lang in language.split("+"):
-                sub_lang = sub_lang.strip()
-                if sub_lang and not ModelManager.is_installed(sub_lang, active_flavor):
+        # Handle multi-language parsing & auto-download
+        for sub_lang in language.split("+"):
+            sub_lang = sub_lang.strip()
+            if not sub_lang:
+                continue
+            # Auto-download if explicitly requested or if language is "osd"
+            need_download = auto_download or (sub_lang == "osd")
+            if need_download and not ModelManager.is_installed(sub_lang, active_flavor):
+                try:
                     ModelManager.download(sub_lang, active_flavor)
+                except Exception:
+                    pass
 
         dpath = datapath.encode("utf-8") if datapath else None
         res = self._lib.dll.tess_init(self._handle, dpath, language.encode("utf-8"), int(oem))
@@ -155,26 +163,102 @@ class TesseractEngine:
         if self._handle:
             self._lib.dll.tess_set_source_resolution(self._handle, ppi)
 
-    def set_image(self, image: Union[str, Path, bytes, bytearray, Any]) -> None:
+    def get_resolution(self) -> int:
+        """Get source image resolution in Pixels Per Inch (PPI)."""
+        if not self._handle:
+            return 0
+        return self._lib.dll.tess_get_source_resolution(self._handle)
+
+    def set_rectangle(self, left: int, top: int, width: int, height: int) -> None:
+        """Restrict recognition to a sub-rectangle (Region of Interest / ROI) of the image."""
+        if self._handle:
+            self._lib.dll.tess_set_rectangle(self._handle, int(left), int(top), int(width), int(height))
+
+    def clear(self) -> None:
+        """Clear recognition results and reset current image while keeping the engine initialized."""
+        if self._handle:
+            self._lib.dll.tess_clear(self._handle)
+
+    def set_char_whitelist(self, whitelist: Optional[str]) -> bool:
+        """Restrict OCR to only these characters (e.g. '0123456789'). Pass None to clear."""
+        if not self._handle:
+            return False
+        val = whitelist.encode("utf-8") if whitelist else None
+        return self._lib.dll.tess_set_char_whitelist(self._handle, val) != 0
+
+    def set_char_blacklist(self, blacklist: Optional[str]) -> bool:
+        """Prevent OCR from outputting these characters. Pass None to clear."""
+        if not self._handle:
+            return False
+        val = blacklist.encode("utf-8") if blacklist else None
+        return self._lib.dll.tess_set_char_blacklist(self._handle, val) != 0
+
+    def apply_config(self, config: str) -> None:
         """
-        Load an image into the engine.
+        Parse and apply command-line configuration flags.
+        Supports:
+          - Page Segmentation Mode: '--psm <0-13>'
+          - Custom variables: '-c <variable>=<value>'
+        """
+        if not config or not self._handle:
+            return
+
+        # 1. Page Segmentation Mode
+        psm_m = re.search(r'--psm\s+(\d+)', config)
+        if psm_m:
+            try:
+                self.set_page_seg_mode(PageSegMode(int(psm_m.group(1))))
+            except ValueError:
+                pass
+
+        # 2. Custom internal variables (-c name=value)
+        for var_m in re.finditer(r'-c\s+([a-zA-Z0-9_]+)=([^\s]+)', config):
+            self.set_variable(var_m.group(1), var_m.group(2))
+
+    def set_image(
+        self,
+        image: Union[str, Path, bytes, bytearray, Any],
+        enhance: bool = False,
+        dpi: Optional[int] = None
+    ) -> None:
+        """
+        Load an image into the engine with automatic DPI normalization and optional enhancement.
         
         Supports:
           - File paths (str or Path): PNG, JPEG, TIFF, BMP, WebP, GIF
           - In-memory bytes / bytearray
-          - PIL.Image.Image instances
+          - PIL.Image.Image instances (with DPI preservation & optional enhancement)
           - NumPy image arrays (OpenCV ndarray)
         """
         if not self._handle:
             raise RuntimeError("Engine is closed.")
 
-        if isinstance(image, (str, Path)):
+        # Check for PIL Image
+        if hasattr(image, "tobytes") and hasattr(image, "mode") and hasattr(image, "size"):
+            if enhance:
+                image = enhance_for_ocr(image)
+            if dpi is None:
+                dpi = extract_image_dpi(image)
+            w, h = image.size
+            img_rgb = image.convert("RGB")
+            raw = img_rgb.tobytes()
+            c_buf = (ctypes.c_ubyte * len(raw)).from_buffer_copy(raw)
+            res = self._lib.dll.tess_set_image_raw(self._handle, c_buf, w, h, 3, w * 3)
+            if res != 0:
+                raise ImageLoadError("Failed to load image from PIL Image.")
+            if dpi and dpi > 0:
+                self.set_resolution(dpi)
+            return
+
+        elif isinstance(image, (str, Path)):
             p = str(image)
             if not os.path.exists(p):
                 raise ImageLoadError(f"Image file does not exist: {p}")
             res = self._lib.dll.tess_set_image_file(self._handle, p.encode("utf-8"))
             if res != 0:
                 raise ImageLoadError(f"Failed to load image file: {p}")
+            if dpi and dpi > 0:
+                self.set_resolution(dpi)
 
         elif isinstance(image, (bytes, bytearray)):
             raw = bytes(image)
@@ -182,30 +266,23 @@ class TesseractEngine:
             res = self._lib.dll.tess_set_image_bytes(self._handle, c_buf, len(raw))
             if res != 0:
                 raise ImageLoadError("Failed to decode image from memory buffer.")
+            if dpi and dpi > 0:
+                self.set_resolution(dpi)
+
+        elif hasattr(image, "shape") and hasattr(image, "dtype") and hasattr(image, "tobytes"):
+            # NumPy array (OpenCV)
+            h, w = image.shape[:2]
+            channels = image.shape[2] if len(image.shape) > 2 else 1
+            raw = image.tobytes()
+            c_buf = (ctypes.c_ubyte * len(raw)).from_buffer_copy(raw)
+            res = self._lib.dll.tess_set_image_raw(self._handle, c_buf, w, h, channels, w * channels)
+            if res != 0:
+                raise ImageLoadError("Failed to load image from NumPy array.")
+            if dpi and dpi > 0:
+                self.set_resolution(dpi)
 
         else:
-            # Check for PIL Image
-            if hasattr(image, "tobytes") and hasattr(image, "mode") and hasattr(image, "size"):
-                w, h = image.size
-                img_rgb = image.convert("RGB")
-                raw = img_rgb.tobytes()
-                c_buf = (ctypes.c_ubyte * len(raw)).from_buffer_copy(raw)
-                res = self._lib.dll.tess_set_image_raw(self._handle, c_buf, w, h, 3, w * 3)
-                if res != 0:
-                    raise ImageLoadError("Failed to load image from PIL Image.")
-
-            # Check for NumPy array (OpenCV)
-            elif hasattr(image, "shape") and hasattr(image, "dtype") and hasattr(image, "tobytes"):
-                h, w = image.shape[:2]
-                channels = image.shape[2] if len(image.shape) > 2 else 1
-                raw = image.tobytes()
-                c_buf = (ctypes.c_ubyte * len(raw)).from_buffer_copy(raw)
-                res = self._lib.dll.tess_set_image_raw(self._handle, c_buf, w, h, channels, w * channels)
-                if res != 0:
-                    raise ImageLoadError("Failed to load image from NumPy array.")
-
-            else:
-                raise TypeError(f"Unsupported image type: {type(image)}")
+            raise TypeError(f"Unsupported image type: {type(image)}")
 
     def recognize(self) -> None:
         """Run OCR recognition pipeline on the currently loaded image."""
@@ -298,6 +375,39 @@ class TesseractEngine:
         finally:
             self._lib.dll.tess_free_text(ptr)
 
+    def get_osd_text(self, page_num: int = 0) -> str:
+        """Get recognized text in classical Tesseract OSD format."""
+        if not self._handle:
+            return ""
+        ptr = self._lib.dll.tess_get_osd_text(self._handle, page_num)
+        if not ptr:
+            return ""
+        try:
+            return ctypes.string_at(ptr).decode("utf-8", errors="replace")
+        finally:
+            self._lib.dll.tess_free_text(ptr)
+
+    def get_all_word_confidences(self) -> List[int]:
+        """Get word confidence values (0 to 100) for all recognized words."""
+        if not self._handle:
+            return []
+        count = ctypes.c_int()
+        ptr = self._lib.dll.tess_get_all_word_confidences(self._handle, ctypes.byref(count))
+        if not ptr:
+            return []
+        try:
+            return [ptr[i] for i in range(count.value)]
+        finally:
+            self._lib.dll.tess_free_confidences(ptr)
+
+    def generate_searchable_pdf(self, image_path: Union[str, Path], output_pdf_base: Union[str, Path]) -> bool:
+        """Generate a searchable PDF from an image file on disk."""
+        if not self._handle:
+            return False
+        img_p = str(image_path).encode("utf-8")
+        out_p = str(output_pdf_base).encode("utf-8")
+        return self._lib.dll.tess_generate_searchable_pdf(self._handle, img_p, out_p) == 0
+
     def get_mean_confidence(self) -> int:
         """Get average recognition confidence percentage (0 to 100)."""
         if not self._handle:
@@ -310,6 +420,12 @@ class TesseractEngine:
         """
         if not self._handle:
             raise RuntimeError("Engine is closed.")
+
+        if not ModelManager.is_installed("osd"):
+            try:
+                ModelManager.download("osd")
+            except Exception:
+                pass
 
         deg = ctypes.c_int()
         deg_conf = ctypes.c_float()
@@ -325,7 +441,7 @@ class TesseractEngine:
             ctypes.byref(s_conf)
         )
         if res != 0:
-            raise RecognitionError("Orientation & Script Detection failed. Ensure 'osd.traineddata' is installed.")
+            raise RecognitionError("Orientation & Script Detection failed. Ensure 'osd.traineddata' is installed and image contains sufficient text.")
 
         return OrientationScriptResult(
             orientation_deg=deg.value,

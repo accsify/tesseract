@@ -2,7 +2,7 @@
 
 > **Product:** Accsify Tesseract Standalone CLI  
 > **Company:** accsify  
-> **Version:** 1.0.5.1  
+> **Version:** 5.5.0.1  
 > **Executable:** `tesseract_cli.exe` (C++ Standalone) & `accsify-tesseract` (Python CLI)  
 > **Architecture:** Windows x64 (AMD64) & Windows x86 (Win32)  
 > **Runtime Dependencies:** **ZERO** (Static C/C++ Runtime `/MT`)  

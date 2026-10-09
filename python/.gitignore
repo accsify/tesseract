@@ -1,0 +1,8 @@
+# Build intermediates
+dist/
+# Python caches and distributions
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/

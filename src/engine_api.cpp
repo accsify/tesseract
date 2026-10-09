@@ -21,6 +21,7 @@
 #include <tesseract/resultiterator.h>
 #include <tesseract/publictypes.h>
 #include <tesseract/version.h>
+#include <tesseract/renderer.h>
 
 #include <windows.h>
 #include <string>
@@ -228,74 +229,229 @@ TESS_API int TESS_CALL tess_get_page_seg_mode(TessEngineHandle handle) {
 TESS_API void TESS_CALL tess_set_source_resolution(TessEngineHandle handle, int ppi) {
     if (!handle) return;
     auto ctx = reinterpret_cast<EngineContext*>(handle);
-    ctx->api.SetSourceResolution(ppi);
+    try {
+        if (ctx->current_pix) {
+            pixSetResolution(ctx->current_pix, ppi, ppi);
+        }
+        ctx->api.SetSourceResolution(ppi);
+        ctx->api.SetVariable("user_defined_dpi", std::to_string(ppi).c_str());
+    } catch (...) {}
+}
+
+TESS_API int TESS_CALL tess_get_source_resolution(TessEngineHandle handle) {
+    if (!handle) return 0;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    try {
+        return ctx->api.GetSourceYResolution();
+    } catch (...) {
+        return 0;
+    }
+}
+
+TESS_API void TESS_CALL tess_set_rectangle(TessEngineHandle handle, int left, int top, int width, int height) {
+    if (!handle) return;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    try {
+        ctx->api.SetRectangle(left, top, width, height);
+    } catch (...) {}
+}
+
+TESS_API void TESS_CALL tess_clear(TessEngineHandle handle) {
+    if (!handle) return;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    try {
+        ctx->cleanup_image();
+        ctx->api.Clear();
+    } catch (...) {}
+}
+
+TESS_API int TESS_CALL tess_set_char_whitelist(TessEngineHandle handle, const char* whitelist) {
+    if (!handle) return 0;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    try {
+        const char* val = whitelist ? whitelist : "";
+        return ctx->api.SetVariable("tessedit_char_whitelist", val) ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
+TESS_API int TESS_CALL tess_set_char_blacklist(TessEngineHandle handle, const char* blacklist) {
+    if (!handle) return 0;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    try {
+        const char* val = blacklist ? blacklist : "";
+        return ctx->api.SetVariable("tessedit_char_blacklist", val) ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
+static Pix* raw_to_pix(const unsigned char* imagedata, int width, int height, int bytes_per_pixel, int bytes_per_line, int dpi = 300) {
+    if (!imagedata || width <= 0 || height <= 0 || bytes_per_pixel <= 0) return nullptr;
+    int bpp = bytes_per_pixel * 8;
+    if (bpp == 0) bpp = 1;
+    Pix* pix = pixCreate(width, height, bpp == 24 ? 32 : bpp);
+    if (!pix) return nullptr;
+    l_uint32 *data = pixGetData(pix);
+    int wpl = pixGetWpl(pix);
+    switch (bpp) {
+        case 1:
+            for (int y = 0; y < height; ++y) {
+                l_uint32* row_data = data + y * wpl;
+                const unsigned char* src_line = imagedata + y * bytes_per_line;
+                for (int x = 0; x < width; ++x) {
+                    if (src_line[x / 8] & (0x80 >> (x % 8))) {
+                        CLEAR_DATA_BIT(row_data, x);
+                    } else {
+                        SET_DATA_BIT(row_data, x);
+                    }
+                }
+            }
+            break;
+        case 8:
+            for (int y = 0; y < height; ++y) {
+                l_uint32* row_data = data + y * wpl;
+                const unsigned char* src_line = imagedata + y * bytes_per_line;
+                for (int x = 0; x < width; ++x) {
+                    SET_DATA_BYTE(row_data, x, src_line[x]);
+                }
+            }
+            break;
+        case 24:
+            for (int y = 0; y < height; ++y) {
+                l_uint32* row_data = data + y * wpl;
+                const unsigned char* src_line = imagedata + y * bytes_per_line;
+                for (int x = 0; x < width; ++x) {
+                    SET_DATA_BYTE(row_data + x, COLOR_RED, src_line[3 * x]);
+                    SET_DATA_BYTE(row_data + x, COLOR_GREEN, src_line[3 * x + 1]);
+                    SET_DATA_BYTE(row_data + x, COLOR_BLUE, src_line[3 * x + 2]);
+                }
+            }
+            break;
+        case 32:
+            for (int y = 0; y < height; ++y) {
+                l_uint32* row_data = data + y * wpl;
+                const unsigned char* src_line = imagedata + y * bytes_per_line;
+                for (int x = 0; x < width; ++x) {
+                    row_data[x] = (static_cast<l_uint32>(src_line[x * 4]) << 24) |
+                                  (static_cast<l_uint32>(src_line[x * 4 + 1]) << 16) |
+                                  (static_cast<l_uint32>(src_line[x * 4 + 2]) << 8) |
+                                  static_cast<l_uint32>(src_line[x * 4 + 3]);
+                }
+            }
+            break;
+        default:
+            pixDestroy(&pix);
+            return nullptr;
+    }
+    pixSetResolution(pix, dpi, dpi);
+    return pix;
 }
 
 TESS_API int TESS_CALL tess_set_image_file(TessEngineHandle handle, const char* filepath) {
     if (!handle || !filepath) return -1;
     auto ctx = reinterpret_cast<EngineContext*>(handle);
-    ctx->cleanup_image();
+    try {
+        ctx->cleanup_image();
 
-    // Read file bytes into memory
-    std::ifstream file(filepath, std::ios::binary | std::ios::ate);
-    if (!file.is_open()) {
+        // Read file bytes into memory
+        std::ifstream file(filepath, std::ios::binary | std::ios::ate);
+        if (!file.is_open()) {
+            return -1;
+        }
+        std::streamsize size = file.tellg();
+        file.seekg(0, std::ios::beg);
+        std::vector<unsigned char> file_buf(static_cast<size_t>(size));
+        if (!file.read(reinterpret_cast<char*>(file_buf.data()), size)) {
+            return -1;
+        }
+
+        return tess_set_image_bytes(handle, file_buf.data(), file_buf.size());
+    } catch (...) {
         return -1;
     }
-    std::streamsize size = file.tellg();
-    file.seekg(0, std::ios::beg);
-    std::vector<unsigned char> file_buf(static_cast<size_t>(size));
-    if (!file.read(reinterpret_cast<char*>(file_buf.data()), size)) {
-        return -1;
-    }
-
-    return tess_set_image_bytes(handle, file_buf.data(), file_buf.size());
 }
 
 TESS_API int TESS_CALL tess_set_image_bytes(TessEngineHandle handle, const unsigned char* data, size_t length) {
     if (!handle || !data || length == 0) return -1;
     auto ctx = reinterpret_cast<EngineContext*>(handle);
-    ctx->cleanup_image();
+    try {
+        ctx->cleanup_image();
 
-    // Decode with stb_image
-    int w = 0, h = 0, channels = 0;
-    stbi_uc* decoded = stbi_load_from_memory(data, static_cast<int>(length), &w, &h, &channels, 0);
-    if (decoded) {
-        ctx->image_w = w;
-        ctx->image_h = h;
-        ctx->image_bpp = channels;
-        ctx->raw_image_pixels.assign(decoded, decoded + (w * h * channels));
-        stbi_image_free(decoded);
+        // 1. Try Leptonica pixReadMem first so format & DPI metadata are preserved
+        Pix* pix = pixReadMem(data, length);
+        if (pix) {
+            int xres = pixGetXRes(pix);
+            int yres = pixGetYRes(pix);
+            if (xres < 70 || yres < 70) {
+                pixSetResolution(pix, 300, 300);
+                xres = 300;
+                yres = 300;
+            }
+            ctx->current_pix = pix;
+            ctx->api.SetImage(pix);
+            ctx->api.SetSourceResolution(yres);
+            ctx->api.SetVariable("user_defined_dpi", std::to_string(yres).c_str());
+            return 0;
+        }
 
-        ctx->api.SetImage(ctx->raw_image_pixels.data(), ctx->image_w, ctx->image_h,
-                          ctx->image_bpp, ctx->image_w * ctx->image_bpp);
-        return 0;
+        // 2. Fallback to decode with stb_image
+        int w = 0, h = 0, channels = 0;
+        stbi_uc* decoded = stbi_load_from_memory(data, static_cast<int>(length), &w, &h, &channels, 0);
+        if (decoded) {
+            ctx->image_w = w;
+            ctx->image_h = h;
+            ctx->image_bpp = channels;
+            Pix* spix = raw_to_pix(decoded, w, h, channels, w * channels, 300);
+            stbi_image_free(decoded);
+            if (spix) {
+                ctx->current_pix = spix;
+                ctx->api.SetImage(spix);
+                ctx->api.SetSourceResolution(300);
+                ctx->api.SetVariable("user_defined_dpi", "300");
+                return 0;
+            }
+        }
+
+        return -1;
+    } catch (...) {
+        return -1;
     }
-
-    // Fallback: try Leptonica pixReadMem
-    Pix* pix = pixReadMem(data, length);
-    if (pix) {
-        ctx->current_pix = pix;
-        ctx->api.SetImage(pix);
-        return 0;
-    }
-
-    return -1;
 }
 
 TESS_API int TESS_CALL tess_set_image_raw(TessEngineHandle handle, const unsigned char* image_data,
                                           int width, int height, int bytes_per_pixel, int bytes_per_line) {
     if (!handle || !image_data || width <= 0 || height <= 0) return -1;
     auto ctx = reinterpret_cast<EngineContext*>(handle);
-    ctx->cleanup_image();
+    try {
+        ctx->cleanup_image();
 
-    ctx->image_w = width;
-    ctx->image_h = height;
-    ctx->image_bpp = bytes_per_pixel;
-    size_t total_bytes = static_cast<size_t>(bytes_per_line) * height;
-    ctx->raw_image_pixels.assign(image_data, image_data + total_bytes);
+        ctx->image_w = width;
+        ctx->image_h = height;
+        ctx->image_bpp = bytes_per_pixel;
 
-    ctx->api.SetImage(ctx->raw_image_pixels.data(), width, height, bytes_per_pixel, bytes_per_line);
-    return 0;
+        Pix* pix = raw_to_pix(image_data, width, height, bytes_per_pixel, bytes_per_line, 300);
+        if (pix) {
+            ctx->current_pix = pix;
+            ctx->api.SetImage(pix);
+            ctx->api.SetSourceResolution(300);
+            ctx->api.SetVariable("user_defined_dpi", "300");
+            return 0;
+        }
+
+        size_t total_bytes = static_cast<size_t>(bytes_per_line) * height;
+        ctx->raw_image_pixels.assign(image_data, image_data + total_bytes);
+
+        ctx->api.SetImage(ctx->raw_image_pixels.data(), width, height, bytes_per_pixel, bytes_per_line);
+        if (ctx->api.GetSourceYResolution() < 70) {
+            ctx->api.SetSourceResolution(300);
+            ctx->api.SetVariable("user_defined_dpi", "300");
+        }
+        return 0;
+    } catch (...) {
+        return -1;
+    }
 }
 
 TESS_API int TESS_CALL tess_recognize(TessEngineHandle handle) {
@@ -438,6 +594,63 @@ TESS_API void TESS_CALL tess_free_text(char* text) {
     }
 }
 
+TESS_API char* TESS_CALL tess_get_osd_text(TessEngineHandle handle, int page_number) {
+    if (!handle) return nullptr;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    try {
+        char* raw = ctx->api.GetOsdText(page_number);
+        if (!raw) return nullptr;
+        char* dup = duplicate_string(raw);
+        delete[] raw;
+        return dup;
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+TESS_API int* TESS_CALL tess_get_all_word_confidences(TessEngineHandle handle, int* out_count) {
+    if (!handle || !out_count) return nullptr;
+    *out_count = 0;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    try {
+        int* raw = ctx->api.AllWordConfidences();
+        if (!raw) return nullptr;
+        int count = 0;
+        while (raw[count] != -1) {
+            count++;
+        }
+        *out_count = count;
+        int* copy = (int*)malloc((count + 1) * sizeof(int));
+        if (copy) {
+            memcpy(copy, raw, (count + 1) * sizeof(int));
+        }
+        delete[] raw;
+        return copy;
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+TESS_API void TESS_CALL tess_free_confidences(int* confidences) {
+    if (confidences) {
+        free(confidences);
+    }
+}
+
+TESS_API int TESS_CALL tess_generate_searchable_pdf(TessEngineHandle handle, const char* image_path, const char* output_pdf_base) {
+    if (!handle || !image_path || !output_pdf_base) return -1;
+    auto ctx = reinterpret_cast<EngineContext*>(handle);
+    try {
+        char base_buf[512] = {0};
+        tess_model_get_path(base_buf, sizeof(base_buf));
+        tesseract::TessPDFRenderer renderer(output_pdf_base, base_buf, false);
+        bool ok = ctx->api.ProcessPages(image_path, nullptr, 0, &renderer);
+        return ok ? 0 : -1;
+    } catch (...) {
+        return -1;
+    }
+}
+
 TESS_API int TESS_CALL tess_detect_orientation_script(
     TessEngineHandle handle,
     int* orient_deg,
@@ -449,15 +662,19 @@ TESS_API int TESS_CALL tess_detect_orientation_script(
     if (!handle) return -1;
     auto ctx = reinterpret_cast<EngineContext*>(handle);
 
-    const char* s_name = nullptr;
-    bool ok = ctx->api.DetectOrientationScript(orient_deg, orient_conf, &s_name, script_conf);
-    if (ok) {
-        if (script_name && script_name_max_len > 0) {
-            strncpy_s(script_name, script_name_max_len, s_name ? s_name : "Unknown", _TRUNCATE);
+    try {
+        const char* s_name = nullptr;
+        bool ok = ctx->api.DetectOrientationScript(orient_deg, orient_conf, &s_name, script_conf);
+        if (ok) {
+            if (script_name && script_name_max_len > 0) {
+                strncpy_s(script_name, script_name_max_len, s_name ? s_name : "Unknown", _TRUNCATE);
+            }
+            return 0;
         }
-        return 0;
+        return -1;
+    } catch (...) {
+        return -1;
     }
-    return -1;
 }
 
 TESS_API TessIteratorHandle TESS_CALL tess_analyse_layout(TessEngineHandle handle) {

@@ -221,6 +221,42 @@ TESS_API int TESS_CALL tess_get_page_seg_mode(TessEngineHandle handle);
  */
 TESS_API void TESS_CALL tess_set_source_resolution(TessEngineHandle handle, int ppi);
 
+/**
+ * @brief Get current source image resolution in Pixels Per Inch (PPI/DPI).
+ * @return PPI/DPI value, or 0 if unset.
+ */
+TESS_API int TESS_CALL tess_get_source_resolution(TessEngineHandle handle);
+
+/**
+ * @brief Restrict recognition to a sub-rectangle (Region of Interest / ROI) of the currently loaded image.
+ * @param handle Engine handle.
+ * @param left Left X pixel coordinate.
+ * @param top Top Y pixel coordinate.
+ * @param width Rectangle width in pixels.
+ * @param height Rectangle height in pixels.
+ */
+TESS_API void TESS_CALL tess_set_rectangle(TessEngineHandle handle, int left, int top, int width, int height);
+
+/**
+ * @brief Clear recognition results and reset current image while keeping the engine initialized.
+ * Allows rapidly recognizing another image without reloading language models.
+ */
+TESS_API void TESS_CALL tess_clear(TessEngineHandle handle);
+
+/**
+ * @brief Set character whitelist (restrict recognition to only these characters, e.g. "0123456789").
+ * Pass NULL or empty string to remove restriction.
+ * @return 1 on success, 0 on failure.
+ */
+TESS_API int TESS_CALL tess_set_char_whitelist(TessEngineHandle handle, const char* whitelist);
+
+/**
+ * @brief Set character blacklist (prevent OCR from outputting these characters).
+ * Pass NULL or empty string to remove restriction.
+ * @return 1 on success, 0 on failure.
+ */
+TESS_API int TESS_CALL tess_set_char_blacklist(TessEngineHandle handle, const char* blacklist);
+
 /* -------------------------------------------------------------------------
  * Image Input
  * ------------------------------------------------------------------------- */
@@ -305,6 +341,36 @@ TESS_API int TESS_CALL tess_get_mean_confidence(TessEngineHandle handle);
  * @brief Free text allocated and returned by any tess_get_*_text function.
  */
 TESS_API void TESS_CALL tess_free_text(char* text);
+
+/**
+ * @brief Get recognized text formatted as classical OSD output. Must be freed with tess_free_text().
+ * Formatted with 'Page number', 'Orientation in degrees', 'Rotate', 'Orientation confidence', 'Script', 'Script confidence'.
+ * @param handle Engine handle.
+ * @param page_number 0-based page number.
+ */
+TESS_API char* TESS_CALL tess_get_osd_text(TessEngineHandle handle, int page_number);
+
+/**
+ * @brief Get an array of confidences (0 to 100) for all recognized words.
+ * @param handle Engine handle.
+ * @param out_count Output pointer receiving the word count.
+ * @return Dynamically allocated int array. Must be freed with tess_free_confidences().
+ */
+TESS_API int* TESS_CALL tess_get_all_word_confidences(TessEngineHandle handle, int* out_count);
+
+/**
+ * @brief Free confidence array returned by tess_get_all_word_confidences().
+ */
+TESS_API void TESS_CALL tess_free_confidences(int* confidences);
+
+/**
+ * @brief Generate a searchable PDF from an image file on disk.
+ * @param handle Engine handle.
+ * @param image_path Source image file path.
+ * @param output_pdf_base Output PDF base path without extension (.pdf will be appended).
+ * @return 0 on success, non-zero on failure.
+ */
+TESS_API int TESS_CALL tess_generate_searchable_pdf(TessEngineHandle handle, const char* image_path, const char* output_pdf_base);
 
 /* -------------------------------------------------------------------------
  * Layout Analysis, Orientation, Writing Direction & Script Detection

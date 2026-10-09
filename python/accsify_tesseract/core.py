@@ -248,6 +248,26 @@ class NativeLibrary:
         d.tess_set_source_resolution.restype = None
         d.tess_set_source_resolution.argtypes = [c_void_p, c_int]
 
+        if hasattr(d, "tess_get_source_resolution"):
+            d.tess_get_source_resolution.restype = c_int
+            d.tess_get_source_resolution.argtypes = [c_void_p]
+
+        if hasattr(d, "tess_set_rectangle"):
+            d.tess_set_rectangle.restype = None
+            d.tess_set_rectangle.argtypes = [c_void_p, c_int, c_int, c_int, c_int]
+
+        if hasattr(d, "tess_clear"):
+            d.tess_clear.restype = None
+            d.tess_clear.argtypes = [c_void_p]
+
+        if hasattr(d, "tess_set_char_whitelist"):
+            d.tess_set_char_whitelist.restype = c_int
+            d.tess_set_char_whitelist.argtypes = [c_void_p, c_char_p]
+
+        if hasattr(d, "tess_set_char_blacklist"):
+            d.tess_set_char_blacklist.restype = c_int
+            d.tess_set_char_blacklist.argtypes = [c_void_p, c_char_p]
+
         d.tess_set_image_file.restype = c_int
         d.tess_set_image_file.argtypes = [c_void_p, c_char_p]
 
@@ -283,6 +303,22 @@ class NativeLibrary:
 
         d.tess_free_text.restype = None
         d.tess_free_text.argtypes = [c_void_p]
+
+        if hasattr(d, "tess_get_osd_text"):
+            d.tess_get_osd_text.restype = c_void_p
+            d.tess_get_osd_text.argtypes = [c_void_p, c_int]
+
+        if hasattr(d, "tess_get_all_word_confidences"):
+            d.tess_get_all_word_confidences.restype = POINTER(c_int)
+            d.tess_get_all_word_confidences.argtypes = [c_void_p, POINTER(c_int)]
+
+        if hasattr(d, "tess_free_confidences"):
+            d.tess_free_confidences.restype = None
+            d.tess_free_confidences.argtypes = [POINTER(c_int)]
+
+        if hasattr(d, "tess_generate_searchable_pdf"):
+            d.tess_generate_searchable_pdf.restype = c_int
+            d.tess_generate_searchable_pdf.argtypes = [c_void_p, c_char_p, c_char_p]
 
         d.tess_detect_orientation_script.restype = c_int
         d.tess_detect_orientation_script.argtypes = [

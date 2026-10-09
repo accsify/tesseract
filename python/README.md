@@ -2,7 +2,7 @@
 
 Official high-performance Python package and CLI for the **Accsify Tesseract OCR Engine**.
 
-[![PyPI version](https://img.shields.io/badge/pypi-v5.5.0.1-blue.svg)](https://pypi.org/project/accsify-tesseract/)
+[![PyPI version](https://img.shields.io/badge/pypi-v1.0.5.1-blue.svg)](https://pypi.org/project/accsify-tesseract/)
 [![Python Versions](https://img.shields.io/badge/python-3.8%20%7C%203.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue.svg)](https://pypi.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%7C%20x86-green.svg)](https://microsoft.com)
@@ -11,15 +11,19 @@ Official high-performance Python package and CLI for the **Accsify Tesseract OCR
 
 ## 1. Overview
 
-`accsify-tesseract` is a modern, object-oriented Python SDK built on top of the monolithic `tesseract_engine.dll` Windows dynamic link library. It provides thread-safe OCR recognition, structured document layout hierarchy, native Windows WinHTTP streaming model downloads, multi-image batch processing, and multi-language support.
+`accsify-tesseract` is a modern, object-oriented Python SDK built on top of the monolithic `tesseract_engine.dll` Windows dynamic link library. It provides thread-safe OCR recognition, 1:1 drop-in `pytesseract` compatibility, automatic background language & OSD model downloading via native Windows WinHTTP, structured document layout hierarchy, zero 0-DPI warning normalization, Pillow preprocessing pipeline, and searchable PDF generation.
 
 ### Key Highlights
-* **Zero Runtime External Dependencies**: The underlying native engine is statically linked with `/MT` (MSVC C/C++ Static Runtime). No Visual C++ Redistributable or external DLLs are needed.
+* **Zero Runtime External Dependencies**: The underlying native engine is statically linked with `/MT` (MSVC C/C++ Static Runtime). No Visual C++ Redistributables, Leptonica, or external runtime DLLs are required.
+* **100% Drop-in `pytesseract` Compatibility**: Provides `accsify_tesseract.compat` allowing legacy projects (such as `accsisuite`) to replace classical installed Tesseract with **zero code modifications**.
+* **Zero "0 DPI" Warnings**: Native C++ Pix resolution normalization ($\ge 70$, defaulting to 300 DPI) and Pillow DPI extraction completely eliminates legacy `Warning. Invalid resolution 0 dpi. Using 70 instead.` console spam.
+* **Automatic OSD Model Downloader**: Detects if `osd.traineddata` is missing and auto-downloads it over HTTPS before running orientation detection, preventing missing model exceptions.
+* **Professional Preprocessing Suite**: Built-in Pillow enhancement pipeline (`enhance_for_ocr`) with auto-contrast, unsharp mask sharpening, and Otsu binarization.
+* **Advanced Engine Controls**: Built-in Region of Interest (ROI) cropping (`set_rectangle`), character whitelisting & blacklisting, word confidences array, and native searchable PDF generation.
 * **Structured JSON & Dictionary Outputs**: Extract full page layout, words, confidences, bounding boxes, textline orders, and writing directions (LTR, RTL, TTB) directly into typed Python dictionaries or JSON.
 * **Concurrent Model Flavors**: Download and store both **fast** (`tessdata_fast`) and **best** (`tessdata_best`) models simultaneously in separated subdirectories without file collisions.
 * **Multi-Language OCR**: Seamlessly combine languages with `+` (e.g. `ara+eng`), with automatic downloading of missing language components.
 * **Multi-Image Batch Processing**: High-throughput processing of image lists with unified structured results via `recognize_batch()`.
-* **Native WinHTTP Downloader**: Download traineddata models with real-time progress callbacks and cancel tokens directly from official repositories over HTTPS.
 * **Universal Image Support**: Directly load file paths (`str`, `Path`), raw encoded bytes (`bytes`, `bytearray`), PIL Images (`PIL.Image`), and NumPy image arrays (OpenCV `ndarray`).
 
 ---
@@ -31,77 +35,195 @@ Official high-performance Python package and CLI for the **Accsify Tesseract OCR
 pip install accsify-tesseract
 ```
 
-### From Local Source (Editable Mode)
+### From Wheel Distribution
+```bash
+# For 64-bit Windows:
+pip install dist/accsify_tesseract-1.0.5.1-py3-none-win_amd64.whl
+
+# For 32-bit Windows:
+pip install dist/accsify_tesseract-1.0.5.1-py3-none-win32.whl
+```
+
+### From Local Source (Editable Development Mode)
 ```bash
 cd d:\projects\c++\tesseract\python
 pip install -e .
 ```
 
-The package automatically discovers and loads `tesseract_engine.dll` from `dist/x64/`, `dist/x86/`, `bin/`, or standard Windows search paths based on whether you are running a 64-bit or 32-bit Python interpreter.
+The package automatically discovers and loads `tesseract_engine.dll` from its bundled package lib directory (`lib/x64/` or `lib/x86/`), `dist/`, `build/`, or standard Windows search paths.
 
 ---
 
-## 3. Quickstart
+## 3. Quickstart & One-Liner Helpers
 
-### One-Liner Recognition
+### High-Level One-Liner Functions
 ```python
 import accsify_tesseract as tess
 
-# Extract plain text
+# 1. Plain text OCR
 text = tess.image_to_string("invoice.png", lang="eng")
 print(text)
 
-# Extract structured JSON string
+# 2. OCR with config flags and Pillow enhancement
+text = tess.image_to_string("scanned_doc.png", lang="eng", config="--psm 11", enhance=True)
+
+# 3. Orientation and Script Detection (OSD) - auto-downloads osd.traineddata if missing
+osd_text = tess.image_to_osd("rotated_page.png")
+print(osd_text)
+
+# 4. Extract character bounding boxes (Box format)
+boxes = tess.image_to_boxes("document.png", lang="eng")
+
+# 5. Extract tab-separated values table (TSV format with header)
+tsv_data = tess.image_to_data("document.png", lang="eng")
+
+# 6. Extract hOCR HTML markup
+hocr_html = tess.image_to_hocr("document.png", lang="eng")
+
+# 7. Generate Searchable PDF directly
+tess.image_to_pdf("scanned_page.png", "output_searchable_doc", lang="eng")
+
+# 8. Extract structured JSON string
 json_str = tess.image_to_json("document.png", lang="eng")
 
-# Extract structured dictionary with words and bounding boxes
+# 9. Extract structured dictionary with words and bounding boxes
 data = tess.image_to_dict("document.png", lang="eng")
 print(f"Mean confidence: {data['mean_confidence']}%")
 for word in data["words"]:
     print(f"Word: {word['text']}, Box: {word['bbox']}, Conf: {word['confidence']}%")
+
+# 10. Query available installed languages & engine version
+print("Installed languages:", tess.get_languages())
+print("Engine version:", tess.get_tesseract_version())
 ```
 
 ---
 
-## 4. Object-Oriented Engine Interface
+## 4. Drop-in `pytesseract` Replacement
 
-The primary interface is `TesseractEngine`, implemented as a thread-safe context manager.
+Existing projects using `pytesseract` (such as `accsisuite`) can immediately switch to `accsify-tesseract` without altering any OCR logic or regex parsers:
 
 ```python
-from pathlib import Path
+# Before:
+# import pytesseract
+
+# After (Drop-in):
+from accsify_tesseract import compat as pytesseract
+# Or simply:
+# from accsify_tesseract import pytesseract
+
+# 1. Setting tesseract_cmd is supported as a safe no-op:
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+# 2. OSD orientation detection (matches standard Rotate: <angle> regex):
+import re
+osd_data = pytesseract.image_to_osd("scanned_page.png", config="--psm 0")
+rot_match = re.search(r"Rotate:\s*(\d+)", osd_data)
+if rot_match:
+    angle = int(rot_match.group(1))
+    print(f"Detected rotation angle: {angle}°")
+
+# 3. String OCR with custom PSM and variables:
+text = pytesseract.image_to_string("document.png", config="--psm 11")
+
+# 4. Multi-language OCR:
+text_bilingual = pytesseract.image_to_string("doc.png", lang="ara+eng")
+
+# 5. Bounding boxes & TSV data:
+boxes = pytesseract.image_to_boxes("document.png")
+tsv_str = pytesseract.image_to_data("document.png", output_type=pytesseract.Output.STRING)
+data_dict = pytesseract.image_to_data("document.png", output_type=pytesseract.Output.DICT)
+
+# 6. Languages and version:
+languages = pytesseract.get_languages(config="")
+version = pytesseract.get_tesseract_version()
+```
+
+---
+
+## 5. Image Preprocessing Suite & DPI Normalization
+
+Tesseract performs significantly better when images have clean contrast, sharp character edges, and valid DPI metadata ($\ge 300$). The `accsify_tesseract.preprocessing` module automates this:
+
+```python
+from PIL import Image
+from accsify_tesseract.preprocessing import enhance_for_ocr, extract_image_dpi
+from accsify_tesseract import image_to_string
+
+# Open raw image
+img = Image.open("low_contrast_receipt.png")
+
+# 1. Extract resolution from image info
+dpi = extract_image_dpi(img)
+print("Detected image DPI:", dpi)
+
+# 2. Apply enhancement: auto-contrast, unsharp mask sharpening, optional binarization
+enhanced_img = enhance_for_ocr(
+    img,
+    auto_contrast=True,
+    sharpen=True,
+    binarize=False,
+    max_dimension=4096
+)
+
+# 3. OCR on enhanced image with DPI normalization
+text = image_to_string(enhanced_img, enhance=True)
+print(text)
+```
+
+---
+
+## 6. Object-Oriented Engine Interface (`TesseractEngine`)
+
+For advanced pipelines, `TesseractEngine` provides complete control over the native engine via thread-safe RAII context management:
+
+```python
 from accsify_tesseract import TesseractEngine, PageSegMode, ModelType
 
 # Open engine with specific language and model flavor
 with TesseractEngine(language="eng", flavor=ModelType.FAST) as engine:
+    # 1. Configure mode and variables
     engine.set_page_seg_mode(PageSegMode.AUTO)
+    engine.set_variable("tessedit_char_whitelist", "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ")
     
-    # Load image from file path, bytes, PIL Image, or OpenCV ndarray
-    engine.set_image(Path("document.png"))
+    # Or apply standard config string:
+    engine.apply_config("--psm 6 -c tessedit_char_whitelist=0123456789")
     
-    # Run recognition pipeline
+    # 2. Load image (file path, bytes, PIL Image, or OpenCV ndarray)
+    engine.set_image("receipt.png", enhance=True)
+    
+    # 3. Restrict OCR to a bounding rectangle (Region of Interest / ROI)
+    engine.set_rectangle(left=50, top=100, width=400, height=80)
+    
+    # 4. Run recognition
     engine.recognize()
     
-    # Retrieve outputs
-    text = engine.get_text()
-    mean_conf = engine.get_mean_confidence()
-    hocr = engine.get_hocr(page_num=0)
-    tsv = engine.get_tsv(page_num=0)
+    # 5. Retrieve outputs
+    roi_text = engine.get_text()
+    print("ROI Text:", roi_text)
     
-    print(f"Confidence: {mean_conf}%")
-    print(text)
+    # 6. Reset ROI to process full image
+    engine.clear()
+    full_text = engine.get_text()
+    
+    # 7. Word confidence scores
+    confidences = engine.get_all_word_confidences()
+    print("Word confidences (0-100):", confidences)
+    
+    # 8. Generate Searchable PDF
+    engine.generate_searchable_pdf("receipt.png", "searchable_receipt")
 ```
 
 ---
 
-## 5. Structured JSON & Dictionary Extraction
+## 7. Structured JSON & Layout Hierarchy
 
 `TesseractEngine.get_json()` and `TesseractEngine.get_structured_dict()` return deep structured layout information natively generated by the C++ engine:
 
 ```python
 with TesseractEngine(language="eng") as engine:
     engine.set_image("sample.png")
-    
-    # Get Python dictionary
     doc = engine.get_structured_dict()
     
     print(f"Total Text: {doc['text']}")
@@ -112,7 +234,7 @@ with TesseractEngine(language="eng") as engine:
         print(f"Word: {w['text']:<20} Conf: {w['confidence']:<6.1f} Box: {w['bbox']} Direction: {w['direction']}")
 ```
 
-### JSON Schema Specification
+### JSON Output Format
 ```json
 {
   "text": "Full extracted UTF-8 document text...",
@@ -133,7 +255,7 @@ with TesseractEngine(language="eng") as engine:
 
 ---
 
-## 6. Multi-Image Batch Processing
+## 8. Multi-Image Batch Processing
 
 Process dozens or hundreds of images in a single session without recreating the engine:
 
@@ -148,58 +270,25 @@ with TesseractEngine(language="eng") as engine:
     for res in batch_results:
         print(f"\n--- Result for: {res.image_path} ---")
         print(f"Confidence: {res.mean_confidence}% | Words: {res.words_count}")
-        print(res.text[:150])  # preview first 150 chars
-        
-        # Export individual image result to JSON or dict
-        json_payload = res.to_json(indent=2)
+        print(res.text[:100], "...")
 ```
 
 ---
 
-## 7. Multi-Language Combination & Auto-Download
+## 9. Model Management & WinHTTP Streaming Downloader
 
-You can combine multiple languages using the `+` operator. With `auto_download=True`, the engine automatically verifies and downloads any missing language before initializing:
+Manage and download models directly from official repositories:
 
-```python
-from accsify_tesseract import TesseractEngine, ModelType
-
-# Combined Arabic and English recognition with auto-downloading
-with TesseractEngine(language="ara+eng", flavor=ModelType.BEST, auto_download=True) as engine:
-    engine.set_image("bilingual_contract.png")
-    engine.recognize()
-    print(engine.get_text())
-```
-
----
-
-## 8. Model Management & Storage Organization
-
-Accsify Tesseract organizes models into structured subdirectories under the active `tessdata/` path to prevent collisions between different versions of the same language:
-
-```
-tessdata/
-├── fast/                 # Compact models (~1-5 MB)
-│   ├── eng.traineddata
-│   └── ara.traineddata
-├── best/                 # High-accuracy full LSTM models (~15-40 MB)
-│   ├── eng.traineddata
-│   └── ara.traineddata
-├── script/               # Script-specific models
-│   └── Arabic.traineddata
-└── standard/             # Standard release models
-```
-
-### Querying Catalog & Downloading
 ```python
 from accsify_tesseract import ModelManager, ModelType
 
-# 1. Inspect installed models
-installed = ModelManager.list_installed()
-print("Installed models:", installed)
+# 1. List installed models
+installed = ModelManager.get_installed_models()
+print("Installed:", [m.name for m in installed])
 
 # 2. Query available catalog models
 catalog = ModelManager.list_catalog(ModelType.FAST)
-for m in catalog:
+for m in catalog[:5]:
     print(f"{m.name:<15} {m.display_name:<30} {m.file_size_mb:.1f} MB (Installed: {m.is_installed})")
 
 # 3. Live progress callback
@@ -210,22 +299,18 @@ def my_progress(name, model_type, downloaded, total, pct, status):
 # 4. Download fast Arabic model
 ModelManager.download("ara", model_type=ModelType.FAST, progress_callback=my_progress)
 
-# 5. Download best Arabic model (stored in tessdata/best/ara.traineddata without overwriting fast!)
+# 5. Download best Arabic model (stored in tessdata/best/ without overwriting fast!)
 ModelManager.download("ara", model_type=ModelType.BEST, progress_callback=my_progress)
 
-# 6. Download multiple models in one call
-ModelManager.download_many(["eng", "fra", "deu"], model_type=ModelType.FAST)
-
-# 7. Configure custom storage directory
+# 6. Configure custom storage directory
 ModelManager.set_path("D:/my_models/tessdata")
-print("Active path:", ModelManager.get_path())
 ```
 
 ---
 
-## 9. Layout Analysis & Bounding Boxes
+## 10. Layout Analysis & Geometry
 
-Analyze the full page geometry across 5 hierarchy levels: `BLOCK`, `PARA`, `TEXTLINE`, `WORD`, `SYMBOL`.
+Analyze page geometry across 5 hierarchy levels: `BLOCK`, `PARA`, `TEXTLINE`, `WORD`, `SYMBOL`:
 
 ```python
 from accsify_tesseract import TesseractEngine, PageIteratorLevel, WritingDirection
@@ -240,33 +325,7 @@ with TesseractEngine(language="ara+eng") as engine:
         b = word.bbox
         is_rtl = word.writing_direction == WritingDirection.RIGHT_TO_LEFT
         dir_label = "RTL (Arabic)" if is_rtl else "LTR (Latin)"
-        
         print(f"[{b.left}, {b.top}, {b.right}, {b.bottom}] {word.text:<25} Conf: {word.confidence:.1f}% Dir: {dir_label}")
-    
-    # Export full layout to JSON
-    json_layout = layout.to_json(indent=2)
-```
-
----
-
-## 10. Orientation and Script Detection (OSD)
-
-Detect page rotation degrees (0°, 90°, 180°, 270°) and identify the primary script:
-
-```python
-from accsify_tesseract import TesseractEngine, PageSegMode
-
-with TesseractEngine(language="osd") as engine:
-    engine.set_page_seg_mode(PageSegMode.OSD_ONLY)
-    engine.set_image("scanned_page.png")
-    
-    osd = engine.detect_orientation_and_script()
-    print(f"Orientation : {osd.orientation_deg}° (Confidence: {osd.orientation_confidence})")
-    print(f"Script      : {osd.script_name} (Confidence: {osd.script_confidence})")
-    print(f"Is Upright  : {osd.is_upright}")
-    
-    # Export to dict or JSON
-    print(osd.to_dict())
 ```
 
 ---
@@ -311,12 +370,6 @@ from accsify_tesseract import (
     ModelDownloadError,     # Network / WinHTTP download failure
     ModelNotFoundError      # Requested model not found in catalog
 )
-
-try:
-    with TesseractEngine(language="nonexistent") as engine:
-        engine.set_image("sample.png")
-except EngineInitError as e:
-    print(f"Initialization error for {e.language} in {e.datapath}: {e}")
 ```
 
 ---
