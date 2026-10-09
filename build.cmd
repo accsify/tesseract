@@ -127,12 +127,12 @@ if %ERRORLEVEL% neq 0 (
 
 if not exist "%BUILD_DIR%\x64" mkdir "%BUILD_DIR%\x64"
 
-cmake -B "%BUILD_DIR%\x64" -G "Ninja" -DCMAKE_BUILD_TYPE=Release "%PROJECT_ROOT%"
+cmake -B "%BUILD_DIR%\x64" -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 "%PROJECT_ROOT%"
 if %ERRORLEVEL% neq 0 (
     echo [WARNING] CMake configuration failed. Retrying with a clean cache...
     if exist "%BUILD_DIR%\x64" rd /s /q "%BUILD_DIR%\x64"
     mkdir "%BUILD_DIR%\x64"
-    cmake -B "%BUILD_DIR%\x64" -G "Ninja" -DCMAKE_BUILD_TYPE=Release "%PROJECT_ROOT%"
+    cmake -B "%BUILD_DIR%\x64" -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 "%PROJECT_ROOT%"
     if !ERRORLEVEL! neq 0 (
         echo [ERROR] CMake configuration failed for x64!
         exit /b 1
@@ -174,12 +174,12 @@ if %ERRORLEVEL% neq 0 (
 
 if not exist "%BUILD_DIR%\x86" mkdir "%BUILD_DIR%\x86"
 
-cmake -B "%BUILD_DIR%\x86" -G "Ninja" -DCMAKE_BUILD_TYPE=Release "%PROJECT_ROOT%"
+cmake -B "%BUILD_DIR%\x86" -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 "%PROJECT_ROOT%"
 if %ERRORLEVEL% neq 0 (
     echo [WARNING] CMake configuration failed. Retrying with a clean cache...
     if exist "%BUILD_DIR%\x86" rd /s /q "%BUILD_DIR%\x86"
     mkdir "%BUILD_DIR%\x86"
-    cmake -B "%BUILD_DIR%\x86" -G "Ninja" -DCMAKE_BUILD_TYPE=Release "%PROJECT_ROOT%"
+    cmake -B "%BUILD_DIR%\x86" -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 "%PROJECT_ROOT%"
     if !ERRORLEVEL! neq 0 (
         echo [ERROR] CMake configuration failed for x86!
         exit /b 1
