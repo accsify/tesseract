@@ -44,19 +44,35 @@ jobs:
       - name: Install Python Packaging Tools
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --upgrade build wheel twine
+          python -m pip install --upgrade build wheel twine setuptools
 
       - name: Verify Build Prerequisites (CMake & Ninja)
         run: |
           cmake --version
           ninja --version
 
+      - name: Cache Upstream Sources (deps)
+        id: cache-deps
+        uses: actions/cache@v4
+        with:
+          path: deps
+          key: deps-sources-${{ runner.os }}-tess550-lep184
+
       - name: Fetch Upstream Dependencies (Tesseract & Leptonica)
+        if: steps.cache-deps.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call update_sources.cmd
 
+      - name: Cache Compiled Native Engine (dist)
+        id: cache-dist
+        uses: actions/cache@v4
+        with:
+          path: dist
+          key: dist-binaries-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'src/**', 'include/**', 'build.cmd') }}
+
       - name: Build Native Standalone Engine (/MT x64 and x86)
+        if: steps.cache-dist.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call build.cmd all
