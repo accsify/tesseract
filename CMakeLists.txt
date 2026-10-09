@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 
+# CMake 3.31+ compatibility: allow legacy subprojects (e.g. leptonica) requiring CMake < 3.5
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "Minimum policy version for subprojects" FORCE)
+
 # Read canonical project version from VERSION file
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
     file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" RAW_VERSION LIMIT_COUNT 1)
