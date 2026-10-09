@@ -81,6 +81,31 @@ if not exist "%DIST_DIR%\include" mkdir "%DIST_DIR%\include"
 copy /y "%INCLUDE_DIR%\*.h*" "%DIST_DIR%\include\" >nul
 
 :: ---------------------------------------------------------------------
+:: 1.5 Verify Upstream Dependencies (auto-fetch if missing)
+:: ---------------------------------------------------------------------
+set "NEED_UPDATE_SOURCES=0"
+if not exist "%PROJECT_ROOT%deps\tesseract\CMakeLists.txt" set "NEED_UPDATE_SOURCES=1"
+if not exist "%PROJECT_ROOT%deps\leptonica\CMakeLists.txt" set "NEED_UPDATE_SOURCES=1"
+
+if "%NEED_UPDATE_SOURCES%"=="1" (
+    echo.
+    echo [*] Upstream dependencies not found in deps/ (tesseract and/or leptonica).
+    echo [*] Automatically launching update_sources.cmd to clone upstream sources...
+    echo.
+    if exist "%PROJECT_ROOT%update_sources.cmd" (
+        call "%PROJECT_ROOT%update_sources.cmd"
+        if !ERRORLEVEL! neq 0 (
+            echo [ERROR] Failed to fetch dependencies via update_sources.cmd!
+            exit /b 1
+        )
+        echo [OK] Upstream dependencies retrieved successfully. Resuming build...
+    ) else (
+        echo [ERROR] update_sources.cmd not found at %PROJECT_ROOT%update_sources.cmd!
+        exit /b 1
+    )
+)
+
+:: ---------------------------------------------------------------------
 :: 2. Build x64 Target
 :: ---------------------------------------------------------------------
 if /i "%TARGET_ARCH%"=="all" goto BUILD_X64
